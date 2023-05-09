@@ -28,9 +28,9 @@ cbPalette <- c("#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7",
 Loading Data
 ```{r}
 #Gene count matrices (in counts/million) with columns for ENSEMBL IDs and gene names 
-GVEX_matrix = read.csv("/external/rprshnas01/kcni/dkiss/KCNI_data_analyses/gvex_matrix_cpm.csv")
-LIBD_matrix = read.csv("/external/rprshnas01/kcni/dkiss/KCNI_data_analyses/libd_matrix_cpm.csv")
-CMC_matrix = read.csv("/external/rprshnas01/kcni/dkiss/KCNI_data_analyses/cmc_matrix_cpm.csv")
+GVEX_matrix = read.csv("/external/rprshnas01/kcni/dkiss/cell_prop_psychiatry/data/gvex_matrix_cpm.csv")
+LIBD_matrix = read.csv("/external/rprshnas01/kcni/dkiss/cell_prop_psychiatry/data/libd_matrix_cpm.csv")
+CMC_matrix = read.csv("/external/rprshnas01/kcni/dkiss/cell_prop_psychiatry/data/cmc_matrix_cpm.csv")
 
 #Metadata for individual cohorts + Psychencode -> Merge for ease of access
 GVEX_metadata = read.delim("/external/rprshnas01/netdata_kcni/stlab/PsychENCODE/BrainGVEX/RNAseq/SYNAPSE_METADATA_MANIFEST.tsv") %>% subset(dataType == "geneExpression") #%>% select(specimenID, PMI, hemisphere, pH, BrodmannArea, RIN)
@@ -45,12 +45,12 @@ CMC_metadata = CMC_metadata %>% inner_join(psychencode_metadata)
 LIBD_matrix = LIBD_matrix[,-which(names(LIBD_matrix) %in% (LIBD_metadata$specimenID %>% subset(LIBD_metadata$contributingStudy == "LIBD_szControl" & LIBD_metadata$ageDeath <=0)))]
 
 #Cell type proportions for each data set merged with metadata - ready for modelling 
-gvex_estimations = read.csv("/external/rprshnas01/kcni/dkiss/KCNI_data_analyses/gvex_cell_prop.csv")
+gvex_estimations = read.csv("/external/rprshnas01/kcni/dkiss/cell_prop_psychiatry/data/gvex_cell_prop.csv")
 gvex_estimations$dataset = rep("GVEX", nrow(gvex_estimations))
-libd_estimations = read.csv("/external/rprshnas01/kcni/dkiss/KCNI_data_analyses/libd_cell_prop.csv")
+libd_estimations = read.csv("/external/rprshnas01/kcni/dkiss/cell_prop_psychiatry/data/libd_cell_prop.csv")
 libd_estimations$dataset = rep("LIBD", nrow(libd_estimations))
 libd_estimations[which(is.na(libd_estimations$individualIdSource)), 'individualIdSource'] = 'LIBD_szControl'
-cmc_estimations = read.csv("/external/rprshnas01/kcni/dkiss/KCNI_data_analyses/cmc_cell_prop.csv")
+cmc_estimations = read.csv("/external/rprshnas01/kcni/dkiss/cell_prop_psychiatry/data/cmc_cell_prop.csv")
 cmc_estimations$dataset = rep("CMC", nrow(cmc_estimations))
 
 #Load single cell samples 
