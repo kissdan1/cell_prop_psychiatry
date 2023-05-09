@@ -1,1 +1,0 @@
-# cell_prop_psychiatry
