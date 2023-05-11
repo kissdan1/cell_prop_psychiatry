@@ -505,7 +505,7 @@ Figure 1: Illustrating the association between cell prop and diagnosis and cohor
 significant_mega = subset(mega_lms, padj <= 0.05 & term == "SCZ")
 significant_mega$asterisks = ifelse(significant_mega$padj <= 0.001, "***",
                                    ifelse(significant_mega$padj <= 0.01, "**", "*"))
-significant_mega$vjust = ifelse(significant_mega$estimate >= 0, -2, 2.5)
+significant_mega$vjust = ifelse(significant_mega$estimate >= 0, -3, 3.5)
 
 figure_1a = mega_lms %>% 
   filter(term %in% 'SCZ') %>% 
@@ -607,6 +607,11 @@ figure_2a = mega_lms %>%
   scale_y_continuous(limits = c(-0.15, 0.32))
 
 #Figure 2b: Plot beta values from meganalysis in 10-year age bind for SST, PVALB, VIP
+significant_mega_age <- subset(mega_lms_by_age, padj <= 0.05 & term == "SCZ" & cell_type %in% c("Inh_SST", "Inh_PVALB", "Inh_VIP"))
+significant_mega_age$asterisks <- ifelse(significant_mega_age$padj <= 0.001, "***",
+                                   ifelse(significant_mega_age$padj <= 0.01, "**", "*"))
+significant_mega_age$vjust = ifelse(significant_mega_age$estimate >= 0, -2.5, 4)
+
 figure_2b = mega_lms_by_age %>% 
   filter(term %in% 'SCZ' & cell_type %in% c("Inh_SST", "Inh_PVALB", "Inh_VIP")) %>% 
   mutate(cell_type = fct_reorder(cell_type, estimate)) %>% 
@@ -616,6 +621,9 @@ figure_2b = mega_lms_by_age %>%
   geom_errorbar(aes(ymin = estimate - std.error, ymax = estimate + std.error)) + 
   ylab('Beta Coefficient') + 
   xlab('Age Range') + 
+  geom_text(data = significant_mega_age,
+            aes(age_range, estimate, label = asterisks), 
+            vjust = significant_mega_age$vjust) +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1),
       axis.title.x = element_text(vjust = 0, size = 14)) +
   facet_wrap(~cell_type, drop = T, scale = "free_x")
@@ -644,6 +652,53 @@ figure_2 = figure_2a / figure_2b / figure_2c
 figure_2 + plot_annotation(tag_levels = 'A') + plot_layout(heights = c(1,1,0.9)) & theme(plot.tag = element_text(size = 25))
 
 ```
+
+Figure 3: Validating trends and interactions in ssRNAseq and microscopy datasets
+```{r, fig.height=8.66, fig.width=10}
+#Figure 3a: ssRNAseq cell proportions binned by 20% age quantile
+#Note: no Pvalues are significant
+
+figure_3a = ss_mega_lms_by_age %>% 
+  filter(term %in% 'SCZ' & cell_type %in% c("SST", "PVALB", "VIP")) %>% 
+  mutate(cell_type = fct_reorder(cell_type, estimate)) %>% 
+  ggplot(aes(x = age_range, y = estimate)) + 
+  geom_hline(yintercept = 0) + 
+  geom_bar(stat = "identity", position = "dodge") + 
+  geom_errorbar(aes(ymin = estimate - std.error, ymax = estimate + std.error)) + 
+  ylab('Beta Coefficient') + 
+  xlab('Age Range (20% quantiles)') + 
+  theme_cowplot() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + 
+  facet_wrap(~cell_type, drop = T, scale = "free")
+
+#Figure 3b: Microscopy cell proportions binned by 20% age quantile
+significant_micro <- subset(micro_mega_lms_by_age, padj <= 0.05 & term == "SCZ" & cell_type %in% c("SST", "PV", "VIP"))
+significant_micro$asterisks <- ifelse(significant_micro$padj <= 0.001, "***",
+                                   ifelse(significant_micro$padj <= 0.01, "**", "*"))
+significant_micro$vjust = ifelse(significant_micro$estimate >= 0, -4, 5)
+
+figure_3b = micro_mega_lms_by_age %>% 
+  filter(term %in% 'SCZ' & cell_type %in% c("SST", "PV", "VIP")) %>% 
+  mutate(cell_type = fct_reorder(cell_type, estimate)) %>% 
+  ggplot(aes(x = age_range, y = estimate)) + 
+  geom_hline(yintercept = 0) + 
+  geom_bar(stat = "identity", position = "dodge") + 
+  geom_errorbar(aes(ymin = estimate - std.error, ymax = estimate + std.error)) + 
+  ylab('Beta Coefficient') + 
+  xlab('Age Range (20% quantiles)') + 
+   geom_text(data = significant_micro,
+            aes(age_range, estimate, label = asterisks), 
+            vjust = significant_micro$vjust) +
+  theme_cowplot() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + 
+  facet_wrap(~cell_type, drop = T, scale = "free") +
+  scale_y_continuous(limits = c(-2.7, 1.7))
+
+figure_3 = figure_3a / figure_3b
+figure_3 + plot_annotation(tag_levels = 'A') + plot_layout(heights = c(1,1)) & theme(plot.tag = element_text(size = 25))
+
+```
+
 
 
 Next Steps:
