@@ -21,16 +21,6 @@ library(patchwork)
 library(ggsignif)
 library(modelr)
 library(ggbeeswarm)
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-library(lemon)
-=======
->>>>>>> ef77234a822c72c1fecb207d412e75933ca1a49e
-=======
->>>>>>> ef77234a822c72c1fecb207d412e75933ca1a49e
-=======
->>>>>>> ef77234a822c72c1fecb207d412e75933ca1a49e
 theme_set(theme_classic2())
 #Colour palette
 cbPalette <- c("#56B4E9", "#009E73","#E69F00", "#0072B2", "#D55E00", "#CC79A7","#000000","#F0E442")
@@ -184,7 +174,7 @@ avg_age_vs_scz
 #As expected, MSSM and Penn have the oldest mean age at death, and are the only two cohorts with unexpected beta estimates for diagnosis vs. cell prop
 ```
 
-AgeDeath vs.SST Proportion: We expect linear models to converge at higher ageDeath if cases/controls have a greater difference in SST proportion in younger samples. In other words, we hypothesize that as patients age, the effect of their diagnosis on SST proportion becomes weaker. 
+AgeDeath vs. SST Proportion: We expect linear models to converge at higher ageDeath if cases/controls have a higher difference in SST number in younger samples. In other words, we hypothesize that as patients age, the effect of their diagnosis on SST proportion becomes weaker. 
 ```{r}
 
 #Plot ageDeath vs. SST proportion for each cohort. 
@@ -207,7 +197,7 @@ all_estimations %>% filter(primaryDiagnosis %in% c('control', 'Schizophrenia'), 
 
 ```
 
-New Models: As outlined above, there appears to be an interaction between age x diagnosis with respect to SST cell proportion. In other words, SST cell proportion is generally lower as ageDeath increases, but declines faster with age in controls. To analyze this more clearly, we create new models (interaction_lms) to visualize this effect. These models include new_study as a covariate, and age x diagnosis as an interactor. 
+New Models: As outlined above, there appears to be an interaction between age x diagnosis with respect to SST cell proportion. In other words, SST cell proportion is generally lower in SCZ patients, but declines faster with age in controls. To analyze this more clearly, we create new models (interaction_lms) to visualize this effect. These models include new_study as a covariate, and age x diagnosis as an interactor. 
 ```{r}
 interaction_lms = all_estimations_long %>% 
   # group stacked data by cell_type
@@ -379,19 +369,7 @@ age_range_plot
 --------------// Single Cell Time //--------------
 
 ```{r}
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-# Create function to map age to age range based on 20% quantiles
-=======
 # Create function to map age to age range based on210% quantiles
->>>>>>> ef77234a822c72c1fecb207d412e75933ca1a49e
-=======
-# Create function to map age to age range based on210% quantiles
->>>>>>> ef77234a822c72c1fecb207d412e75933ca1a49e
-=======
-# Create function to map age to age range based on210% quantiles
->>>>>>> ef77234a822c72c1fecb207d412e75933ca1a49e
 age_to_range_quantile <- function(age) {
   quantiles = quantile(age, probs = seq(0.2, 1, 0.2))
   range_vec = c()
@@ -566,24 +544,12 @@ mega$newStudy = rep("All", nrow(mega))
 mega$dataset = rep("All", nrow(mega))
 mega$avg_age = rep(NA, nrow(mega))
 combined_lms = rbind(combined_lms, mega)
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-combined_lms$newStudy = combined_lms$newStudy %>% factor(levels = c("Pitt", "GVEX", "NIMH_HBCC", "LIBD_szControl", "MSSM", "Penn","All"))
-=======
 combined_lms$newStudy = combined_lms$newStudy %>% factor(levels = c("GVEX", "NIMH_HBCC","Pitt", "LIBD_szControl", "MSSM", "Penn","All"))
->>>>>>> ef77234a822c72c1fecb207d412e75933ca1a49e
-=======
-combined_lms$newStudy = combined_lms$newStudy %>% factor(levels = c("GVEX", "NIMH_HBCC","Pitt", "LIBD_szControl", "MSSM", "Penn","All"))
->>>>>>> ef77234a822c72c1fecb207d412e75933ca1a49e
-=======
-combined_lms$newStudy = combined_lms$newStudy %>% factor(levels = c("GVEX", "NIMH_HBCC","Pitt", "LIBD_szControl", "MSSM", "Penn","All"))
->>>>>>> ef77234a822c72c1fecb207d412e75933ca1a49e
 
 significant_combined = subset(combined_lms, padj < 0.05 & cell_type %in% c("Inh_SST", "Inh_PVALB", "Inh_VIP") & term == "SCZ")
 significant_combined$asterisks <- ifelse(significant_combined$padj <= 0.001, "***",
                                    ifelse(significant_combined$padj <= 0.01, "**", "*"))
-significant_combined$vjust = ifelse(significant_combined$estimate >= 0, -3, 6)
+significant_combined$vjust = ifelse(significant_combined$estimate >= 0, -3, 4)
 
 figure_1b = combined_lms %>% 
   filter(term == 'SCZ', cell_type %in% c("Inh_SST", "Inh_PVALB", "Inh_VIP")) %>% 
@@ -600,16 +566,6 @@ figure_1b = combined_lms %>%
             vjust = significant_combined$vjust) +
    theme(
      axis.text.x = element_blank(),
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-     axis.text.y = element_text(size = 13),
-=======
->>>>>>> ef77234a822c72c1fecb207d412e75933ca1a49e
-=======
->>>>>>> ef77234a822c72c1fecb207d412e75933ca1a49e
-=======
->>>>>>> ef77234a822c72c1fecb207d412e75933ca1a49e
      axis.title.x = element_text(vjust = 6, size = 16),
      axis.title.y = element_text(size = 16),
     strip.text.x = element_text(size = 16),
@@ -632,16 +588,6 @@ figure_1c = all_estimations_long %>%
   scale_fill_manual(values = cbPalette,) +
   theme(
      axis.text.x = element_text(size = 13),
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-     axis.text.y = element_text(size = 13),
-=======
->>>>>>> ef77234a822c72c1fecb207d412e75933ca1a49e
-=======
->>>>>>> ef77234a822c72c1fecb207d412e75933ca1a49e
-=======
->>>>>>> ef77234a822c72c1fecb207d412e75933ca1a49e
      axis.title.x = element_text(vjust = -2, size = 16),
      axis.title.y = element_text(size = 16),
     strip.text.x = element_text(size = 14)) +
@@ -677,16 +623,6 @@ figure_2a = mega_lms %>%
             vjust = significant_mega$vjust) +
   theme(
     axis.text.x = element_text(angle = 45, vjust = 1, hjust= 1, size = 13), 
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-     axis.text.y = element_text(size = 13),
-=======
->>>>>>> ef77234a822c72c1fecb207d412e75933ca1a49e
-=======
->>>>>>> ef77234a822c72c1fecb207d412e75933ca1a49e
-=======
->>>>>>> ef77234a822c72c1fecb207d412e75933ca1a49e
     axis.title.x = element_text(vjust = 8, size = 16),
     axis.title.y = element_text(size = 16),
     strip.text.x = element_text(size = 16)) +
@@ -713,10 +649,6 @@ figure_2b = mega_lms_by_age %>%
             vjust = significant_mega_age$vjust) +
   theme(
     axis.text.x = element_text(angle = 45, vjust = 1, hjust= 1, size = 13), 
-<<<<<<< HEAD
-
-=======
->>>>>>> ef77234a822c72c1fecb207d412e75933ca1a49e
     axis.title.x = element_text(vjust = 8, size = 16),
     axis.title.y = element_text(size = 16),
     strip.text.x = element_text(size = 16)) +
@@ -738,126 +670,11 @@ figure_2c = all_estimations_long %>%
   xlab('Age') + 
   theme(
      axis.text.x = element_text(size = 13),
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-     axis.text.y = element_text(size = 13),
-=======
->>>>>>> ef77234a822c72c1fecb207d412e75933ca1a49e
-=======
->>>>>>> ef77234a822c72c1fecb207d412e75933ca1a49e
-=======
->>>>>>> ef77234a822c72c1fecb207d412e75933ca1a49e
      axis.title.x = element_text(vjust = -2, size = 16),
      axis.title.y = element_text(size = 16),
     legend.position = "bottom",
     legend.title = element_blank(),
     strip.text.x = element_text(size = 16)) +
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-  facet_grid(~cell_type, drop = T, scale = "free_x", space = "free") +
-  guides(fill = guide_legend(nrow = 1)) +
-  scale_y_continuous(limits = c(-3, 3 )) + 
-  scale_color_manual(values=c("dodgerblue2", "firebrick2"))
-  
-
-figure_2 = figure_2b / figure_2c / figure_2a
-figure_2 + plot_annotation(tag_levels = 'A') + plot_layout(heights = c(1,0.9,1)) & theme(plot.tag = element_text(size = 25))
-
-```
-
-Figure 3: Validating trends and interactions in ssRNAseq 
-```{r, fig.height= 10, fig.width=10}
-#Figure 3a: ssRNAseq cell proportions binned by 20% age quantile
-#Note: no Pvalues are significant
-figure_3a = ss_mega_lms_by_age %>% 
-  filter(term %in% 'SCZ' & cell_type %in% c("SST", "PVALB", "VIP")) %>% 
-  mutate(cell_type = fct_reorder(cell_type, estimate)) %>% 
-  ggplot(aes(x = age_class, y = estimate)) + 
-  geom_hline(yintercept = 0) + 
-  geom_bar(stat = "identity", position = "dodge") + 
-  geom_errorbar(aes(ymin = estimate - std.error, ymax = estimate + std.error)) + 
-  ylab('Beta Coefficient') + 
-  xlab('Age Range (20% quantiles)') + 
-  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1, size = 13),
-     axis.text.y = element_text(size = 13),) + 
-  facet_wrap(~cell_type, drop = T, scale = "free")
-
-figure_3b = snCTPs_long %>%
-  filter(Phenotype %in% c('SZ', "CON"), cell_type %in% c("SST", "PVALB", "VIP")) %>%
-  ggplot(aes(x = ageOfDeath, y = rel_prop, color = Phenotype)) +
-  geom_point(alpha = 0.8, size = 1.3) + 
-  geom_smooth(se = F, method = 'lm', fullrange = T) +
-  scale_colour_hue(labels=c("Control", "SCZ")) +
-  ylab('Relative Cell Prop.') + 
-  xlab('Age') + 
-  theme(
-     axis.text.x = element_text(size = 13),
-     axis.text.y = element_text(size = 13),
-     axis.title.x = element_text(vjust = -2, size = 16),
-     axis.title.y = element_text(size = 16),
-    legend.position = "bottom",
-    legend.title = element_blank(),
-    strip.text.x = element_text(size = 16)) +
-    facet_rep_grid(rows = vars(cell_type), cols = vars(dataset), drop = T, scale = "free", switch = "y", space = "free_x",repeat.tick.labels = T) +
-    guides(fill = guide_legend(nrow = 1)) + 
-  scale_color_manual(values=c("dodgerblue2", "firebrick2"))
-
-
-
-figure_3 = figure_3a / figure_3b
-figure_3 + plot_annotation(tag_levels = 'A') + plot_layout(heights = c(1,2)) & theme(plot.tag = element_text(size = 25))
-
-```
-
-Figure 4: Validating trends and interactions in microscopy data
-```{r, fig.height= 8, fig.width=10}
-#Figure 4a: Microscopy cell proportions binned by 20% age quantile
-significant_micro <- subset(micro_mega_lms_by_age, padj <= 0.05 & term == "SCZ" & cell_type %in% c("SST", "PV", "VIP"))
-significant_micro$asterisks <- ifelse(significant_micro$padj <= 0.001, "***",
-                                   ifelse(significant_micro$padj <= 0.01, "**", "*"))
-significant_micro$vjust = ifelse(significant_micro$estimate >= 0, -2, 4)
-
-figure_4a = micro_mega_lms_by_age %>% 
-  filter(term %in% 'SCZ' & cell_type %in% c("SST", "PV", "VIP")) %>% 
-  mutate(cell_type = fct_reorder(cell_type, estimate)) %>% 
-  ggplot(aes(x = age_range, y = estimate)) + 
-  geom_hline(yintercept = 0) + 
-  geom_bar(stat = "identity", position = "dodge") + 
-  geom_errorbar(aes(ymin = estimate - std.error, ymax = estimate + std.error)) + 
-  ylab('Beta Coefficient') + 
-  xlab('Age Group)') + 
-   geom_text(data = significant_micro,
-            aes(age_range, estimate, label = asterisks), 
-            vjust = significant_micro$vjust) +
-  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1),
-     axis.text.y = element_text(size = 13),) + 
-  facet_wrap(~cell_type, drop = T, scale = "free") +
-  scale_y_continuous(limits = c(-2.7, 1.7))
-
-figure_4b = microCTPs_long %>%
-  filter(Subject.Group %in% c('SCHIZ', "Control"), cell_type %in% c("SST", "PV", "VIP")) %>%
-  ggplot(aes(x = Age, y = rel_prop, color = Subject.Group)) +
-  geom_point(alpha = 0.8, size = 1.3) + 
-  geom_smooth(se = F, method = 'lm', fullrange = T) +
-  scale_colour_hue(labels=c("Control", "SCZ")) +
-  ylab('Relative Cell Prop.') + 
-  xlab('Age') + 
-  theme(
-     axis.text.x = element_text(size = 13),
-     axis.text.y = element_text(size = 13),
-     axis.title.x = element_text(vjust = -2, size = 16),
-     axis.title.y = element_text(size = 16),
-    legend.position = "bottom",
-    legend.title = element_blank(),
-    strip.text.x = element_text(size = 16)) +
-  facet_grid(~cell_type, drop = T, scale = "free_x", space = "free") +
-  guides(fill = guide_legend(nrow = 1)) + 
-  scale_color_manual(values=c("dodgerblue2", "firebrick2")) +
-  scale_y_continuous(limits = c(0, 5))
-
-figure_4 = figure_4a / figure_4b
   facet_grid(~cell_type, drop = T, scale = "free_x", space = "free") +
   guides(fill = guide_legend(nrow = 1))
   
@@ -929,5 +746,4 @@ Next Steps:
 -Clean code 
 -Sliiiides <3 
 -Plotgrid/patchwork -> multi-panel figures 
-
 
