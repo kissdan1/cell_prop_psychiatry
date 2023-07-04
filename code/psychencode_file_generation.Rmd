@@ -157,7 +157,7 @@ LIBD_sds = rowSds(LIBD_cpm, na.rm = T)
 CMC_sds = rowSds(CMC_cpm, na.rm = T)
 GVEX_matrix = GVEX_cpm[GVEX_sds > 0.1, ] %>% as.data.frame() %>% rownames_to_column( var = "gene_symbol") 
 LIBD_matrix = LIBD_cpm[LIBD_sds > 0.1, ] %>% as.data.frame() %>% rownames_to_column( var = "gene_symbol") 
-CMC_matrix = CMC_cpm[LIBD_sds > 0.1, ] %>% as.data.frame() %>% rownames_to_column( var = "gene_symbol")
+CMC_matrix = CMC_cpm[CMC_sds > 0.1, ] %>% as.data.frame() %>% rownames_to_column( var = "gene_symbol")
 ```
 
 
@@ -186,7 +186,7 @@ colnames(sonny_markers) = colnames(sonny_markers) %>% make.names() %>% tolower()
 # I find it helpful to map some gene symbols to ensembl ids manually using mappings from hgnc, you can get those from here: 
 # http://ftp.ebi.ac.uk/pub/databases/genenames/hgnc/tsv/hgnc_complete_set.txt
 
-hgnc_mapping = read_tsv('/external/rprshnas01/kcni/dkiss/KCNI_data_analyses/hgnc_complete_set.txt')
+hgnc_mapping = read_tsv('/external/rprshnas01/kcni/dkiss/cell_prop_psychiatry/data/hgnc_complete_set.txt')
 
 # now, this is the list of sonnys markers with entrez ids and ensembl ids where possible
 sonny_hgnc_merged_markers = left_join(sonny_markers %>% dplyr::rename(entrez_id = entrez.gene.id), 
@@ -203,7 +203,7 @@ new_markers = sonny_hgnc_merged_markers %>% filter(used.in.mgp == "TRUE")
 new_cell_types = new_markers %>% filter(!is.na(subclass)) %>% pull(subclass) %>% unique
 new_marker_list  = lapply(new_cell_types, function(cell_type){
   return(new_markers %>% filter(subclass == cell_type, 
-                                ensembl_id %in% unique(c(GVEX_matrix$gene_symbol, LIBD_matrix$gene_symbol)),
+                                ensembl_id %in% unique(c(GVEX_matrix$gene_symbol, LIBD_matrix$gene_symbol, CMC_matrix$gene_symbol)),
   ) %>% pull(ensembl_id))
 })
 names(new_marker_list) = c('Astrocyte', 'Endothelial', 'Exc_IT', 'Exc_L4_IT', 'Exc_L5_ET', 'Exc_L5/6_IT_Car3', 'Exc_L5/6_NP', 'Exc_L6_CT', 'Exc_L6b', 'Inh_LAMP5', 'Microglia', 'Oligodendrocyte', 'OPC', 'Inh_PAX6', 'Pericyte', 'Inh_PVALB', 'Inh_SST', 'Inh_VIP', 'VLMC')
