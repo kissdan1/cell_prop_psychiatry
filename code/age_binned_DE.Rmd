@@ -166,7 +166,7 @@ pseudobulk_metadata = read.delim("/external/rprshnas01/netdata_kcni/stlab/SZBDMu
 Subset Data
 ```{r}
 pseudobulk_metadata = pseudobulk_metadata %>%
-  subset(grepl(pseudobulk_metadata$CMC_ID, pattern = "MSSM") == TRUE) %>%
+  subset(pseudobulk_metadata$Cohort == "MtSinai") %>%
   mutate(group = case_when(
     Phenotype == "SZ" & Age >= 70 ~ "SCZ_Over70 ",
     Phenotype == "SZ" & Age < 70 ~ "SCZ_Under70",
@@ -194,7 +194,7 @@ SST: Create DGEList and perform MDS
 #Create DGEList object and add normalization factors
 d0_SST = DGEList(pseudobulk_SST) %>% calcNormFactors()
 #Filter low-expressed genes
-cutoff_SST = 20
+cutoff_SST = 1
 drop_SST = which(apply(cpm(d0_SST), 1, max) < cutoff_SST)
 d_SST = d0_SST[-drop_SST,] 
 dim(d_SST) # number of genes left
