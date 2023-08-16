@@ -1,0 +1,83 @@
+---
+title: "psychencode_DE_plots"
+author: "Daniel Kiss"
+date: "8/16/2023"
+output: html_document
+---
+
+Create a data frame of pearson correlation data between under 70 and over 70 groups for each cell type
+```{r}
+#Load data and initialize empty data frame
+DE_results_MtSinai = readRDS("/external/rprshnas01/kcni/dkiss/cell_prop_psychiatry/data/DE_results_MtSinai")
+DE_results_McLean = readRDS("/external/rprshnas01/kcni/dkiss/cell_prop_psychiatry/data/DE_results_McLean")
+#Compute pearson correlation values and save them to vectors with NA if the cell type was filtered out
+mclean_corr = c()
+mtsinai_corr = c()
+for(CELL_TYPE in CELL_TYPES) {
+  if(DE_results_McLean[[CELL_TYPE]] %>% is.null == F) {
+    tplot = DE_results_McLean[[CELL_TYPE]][['t_Plot']]
+    correlation <- cor(tplot$data$t.x, tplot$data$t.y)
+    mclean_corr = mclean_corr %>% append(correlation)
+  }
+  else {
+    mclean_corr = mclean_corr %>% append(NA)
+  }
+}
+for(CELL_TYPE in CELL_TYPES) {
+  if(DE_results_MtSinai[[CELL_TYPE]] %>% is.null == F) {
+    tplot = DE_results_MtSinai[[CELL_TYPE]][['t_Plot']]
+    correlation <- cor(tplot$data$t.x, tplot$data$t.y)
+    mtsinai_corr = mtsinai_corr %>% append(correlation)
+  }
+  else {
+    mtsinai_corr = mtsinai_corr %>% append(NA)
+  }
+}
+#Create data frame
+
+#Avg cells per cell type 
+avg_cells = c()
+for(CELL_TYPE in CELL_TYPES) {
+  avg = pseudobulk_metadata %>% filter(Celltype == CELL_TYPE) %>%  pull(num_cells) %>% mean()
+  avg_cells = avg_cells %>% append(avg)
+}
+#L
+corr_data = data.frame(cell_type = CELL_TYPES, mtsinai_corr = mtsinai_corr, mclean_corr = mclean_corr, avg_cells = avg_cells)  %>%
+  pivot_longer(cols = mtsinai_corr:mclean_corr, names_to = 'study', values_to = 'corr') %>%  
+  mutate(class = case_when(
+    str_detect(cell_type, "In") ~ "Inhibitory",
+    str_detect(cell_type, "Ex") ~ "Excitatory",
+    T ~ "Non-Neuronal"))
+  
+
+```
+
+Let's plot corr_data
+```{r, fig.height=4, fig.width=8 }
+corr_plot = corr_data %>%
+  ggplot(aes(x = cell_type, y = corr, fill = study)) + 
+  geom_bar(stat = "identity", position = "dodge") +
+  theme(
+    axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1, size = 13), 
+    axis.title.x = element_text(vjust = 6, size = 16),
+    axis.title.y = element_text(size = 16),
+    strip.text.x = element_text(size = 16)) + 
+  facet_grid(~class, drop = T, scale = "free_x", space = "free") + 
+  ylab('Pearson Correlation - Above/Below 70') + 
+  xlab('Cell Type') 
+
+corr_plot
+
+corr_vs_avg_cells = corr_data %>% ggplot(aes(x = cell_type, y = avg_cells)) + geom_bar(stat = "identity", position = "dodge") +
+  theme(
+    axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1, size = 13), 
+    axis.title.x = element_text(vjust = 6, size = 16),
+    axis.title.y = element_text(size = 16),
+    strip.text.x = element_text(size = 16)) + 
+  facet_grid(~class, drop = T, scale = "free_x", space = "free")
+corr_vs_avg_cells
+```
+
+
+
+
