@@ -353,13 +353,36 @@ cor.test(DE_over_70$t, DE_under_70$t)
 
 Proceeding with no-contrasts for subsequent analyses
 
+<<<<<<< HEAD
+=======
+```{r}
+suppressPackageStartupMessages({
+  library(tidyverse)
+  library(Seurat)
+  library(edgeR)
+  library(ggrepel)
+  library(cowplot)
+  library(limma)
+  library(ggpubr)
+  library(gprofiler2)
+  library(EnhancedVolcano)
+})
+theme_set(theme_classic2())
+#Colour palette
+cbPalette <- c("#56B4E9", "#009E73","#E69F00", "#0072B2", "#D55E00", "#CC79A7","#000000","#F0E442")
+```
+>>>>>>> 5ba7279da9217526bdb401774fe434181dc5c35b
 
 Load Data // Define Variables
 ```{r}
 pseudobulk = read.delim("/external/rprshnas01/netdata_kcni/stlab/SZBDMulticohort/pseudobulk_fine_grained.counts.tsv")
 pseudobulk_metadata = read.delim("/external/rprshnas01/netdata_kcni/stlab/SZBDMulticohort/pseudobulk_fine_grained.metadata.tsv")
 CELL_TYPES = pseudobulk_metadata$Celltype %>% unique()
+<<<<<<< HEAD
 USE_COHORT = 'MtSinai'
+=======
+USE_COHORT = 'McLean'
+>>>>>>> 5ba7279da9217526bdb401774fe434181dc5c35b
 ```
 
 
@@ -375,7 +398,10 @@ for(CELL_TYPE in CELL_TYPES) {
   over_70_subjects = pseudobulk_metadata %>% 
   filter(Celltype == CELL_TYPE, Cohort == USE_COHORT, num_cells > 50, Age > 70) %>% 
   pull(unique_donor_ID)
+<<<<<<< HEAD
   
+=======
+>>>>>>> 5ba7279da9217526bdb401774fe434181dc5c35b
   #Skip cell type if no subjects make it past filtering
   if(length(under_70_subjects) <= 10 || length(over_70_subjects) <= 10) {
     next  # Skip to the next iteration of the loop
@@ -501,6 +527,7 @@ for(CELL_TYPE in names(DE_data)) {
 }
 ```
 
+<<<<<<< HEAD
 We will run the code above 2x, once for McLean and once for Sinai, then save each result for later use 
 ```{r}
 saveRDS(DE_data, file = paste0("/external/rprshnas01/kcni/dkiss/cell_prop_psychiatry/data/DE_data_", USE_COHORT))
@@ -570,6 +597,23 @@ corr_plot
 
 
 
+=======
+Next: Plot t-plots for each cohort -> will take a while to run
+```{r, fig.height= 10, fig.width= 15}
+# Create an empty list to store the tplot ggplot objects
+combined_tplots <- list()
+for (CELL_TYPE in names(DE_results)) {
+  tplot <- DE_results[[CELL_TYPE]]$t_Plot
+  combined_tplots[[CELL_TYPE]] <- tplot
+}
+# Combine tplot ggplot objects
+combined_tplots <- cowplot::plot_grid(plotlist = combined_tplots, ncol = 5)
+
+combined_tplots
+
+
+```
+>>>>>>> 5ba7279da9217526bdb401774fe434181dc5c35b
 
 
 
