@@ -37,6 +37,8 @@ Create a list of relevant data for each cell type
 ```{r}
 #Define cohort (MtSinai or McLean)
 USE_COHORT = 'MtSinai'
+NUM_CELLS = 50
+AGE_THRESH = 70 
 
 DE_data = list()
 #Loop through ALL cell types and perform above analyses

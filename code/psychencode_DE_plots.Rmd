@@ -76,7 +76,22 @@ corr_vs_avg_cells = corr_data %>% ggplot(aes(x = cell_type, y = avg_cells)) + ge
     strip.text.x = element_text(size = 16)) + 
   facet_grid(~class, drop = T, scale = "free_x", space = "free")
 corr_vs_avg_cells
+#Adjust for cohorts -> add median instead of mean -> corr between this and pearson from previous graph
 ```
+
+Gprofiler: Take list of uncorrected pvals from a cell type (PVALB?) and run genes through grprofiler -> ranked whole list by logFC and unranked/pval thresholded
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

@@ -365,6 +365,12 @@ figure_1c <- all_estimations_long %>%
 figure_1 <- figure_1b / figure_1c
 figure_1 + plot_annotation(tag_levels = 'A') + plot_layout(heights = c(1, 1.5)) & theme(plot.tag = element_text(size = 25))
 
+#Save to plots folder
+output_filename <- "~/cell_prop_psychiatry/plots/figure_1.jpg"
+
+# Use ggsave to save the plot as a JPG image
+ggsave(output_filename, figure_1, width = 10, height = 13, dpi = 300)
+
 ```
 
 Figure 2: Introducing and presenting an interaction between age and diagnosis w/rt cell proportion.
@@ -454,6 +460,12 @@ figure_2c <- all_estimations_long %>%
 figure_2 <- figure_2b / figure_2c / figure_2a
 figure_2 + plot_annotation(tag_levels = 'A') + plot_layout(heights = c(1, 0.9, 1)) & theme(plot.tag = element_text(size = 25))
 
+#Save to plots folder
+output_filename <- "~/cell_prop_psychiatry/plots/figure_2.jpg"
+
+# Use ggsave to save the plot as a JPG image
+ggsave(output_filename, figure_2, width = 10, height = 13, dpi = 300)
+
 ```
 
 Figure 3: Validating trends and interactions in ssRNAseq 
@@ -467,7 +479,7 @@ figure_3a <- ss_mega_lms_by_age %>%
   geom_bar(stat = "identity", position = "dodge") + 
   geom_errorbar(aes(ymin = estimate - std.error, ymax = estimate + std.error)) + 
   ylab('Beta Coefficient') + 
-  xlab('Age Range (20% quantiles)') + 
+  xlab('Age Range (Above/Below 70)') + 
   theme(
     axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 13),
     axis.text.y = element_text(size = 13)
@@ -492,8 +504,7 @@ figure_3b <- snCTPs_long %>%
     legend.title = element_blank(),
     strip.text.x = element_text(size = 16)
   ) +
-  facet_rep_grid(
-    rows = vars(cell_type),
+  facet_rep_grid(rows = vars(cell_type),
     cols = vars(dataset),
     drop = T,
     scale = "free",
@@ -508,5 +519,14 @@ figure_3b <- snCTPs_long %>%
 figure_3 <- figure_3a / figure_3b
 figure_3 + plot_annotation(tag_levels = 'A') + plot_layout(heights = c(1, 2)) & theme(plot.tag = element_text(size = 25))
 
+#Save to plots folder
+output_filename <- "~/cell_prop_psychiatry/plots/figure_3.jpg"
+
+# Use ggsave to save the plot as a JPG image
+ggsave(output_filename, figure_3, width = 10, height = 10, dpi = 300)
+
 ```
+
+
+
 
