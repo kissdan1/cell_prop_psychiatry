@@ -77,12 +77,13 @@ corr_vs_avg_cells = corr_data %>% ggplot(aes(x = cell_type, y = avg_cells)) + ge
   facet_grid(~class, drop = T, scale = "free_x", space = "free")
 corr_vs_avg_cells
 #Adjust for cohorts -> add median instead of mean -> corr between this and pearson from previous graph
+
+#Save to plots folder
+output_filename <- "~/cell_prop_psychiatry/plots/corr_plot.jpg"
+
+# Use ggsave to save the plot as a JPG image
+ggsave(output_filename, corr_plot, width = 8, height = 5, dpi = 300)
 ```
-
-Gprofiler: Take list of uncorrected pvals from a cell type (PVALB?) and run genes through grprofiler -> ranked whole list by logFC and unranked/pval thresholded
-
-
-
 
 
 

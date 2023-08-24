@@ -4,3 +4,104 @@ author: "Daniel Kiss"
 date: "8/17/2023"
 output: html_document
 ---
+
+As a preliminary GO/pathway analysis, we will use G:Profiler to look at differentially expressed pathways in our candidate cell types. We will begin by generating txt file containing each cell type's DE genes in both Above_70 and Below_70 groups to be used in gprofiler.
+
+```{r}
+DE_results_MtSinai = readRDS("/external/rprshnas01/kcni/dkiss/cell_prop_psychiatry/data/DE_results_MtSinai")
+DE_results_McLean = readRDS("/external/rprshnas01/kcni/dkiss/cell_prop_psychiatry/data/DE_results_McLean")
+CELL_TYPES = names(DE_results_McLean) 
+
+top_genes_count <- 2000
+
+for (CELL_TYPE in CELL_TYPES) {
+  ranked_genes_under = DE_results_McLean[[CELL_TYPE]]$DE_tables$DE_under %>%
+    arrange(desc(logFC)) %>%
+    pull(genes) %>%
+    head(top_genes_count)
+  ranked_genes_over = DE_results_McLean[[CELL_TYPE]]$DE_tables$DE_over %>%
+    arrange(desc(logFC)) %>%
+    pull(genes) %>%
+    head(top_genes_count)
+  
+  file_path = paste0("/external/rprshnas01/kcni/dkiss/cell_prop_psychiatry/data/gprofiler_files/", CELL_TYPE, "_ranked_genes.txt")
+  
+  # Create a connection to the file
+  con <- file(file_path, "w")
+  
+  # Write the under_70 list
+  cat(paste0(">",CELL_TYPE, "_under_70\n", paste(ranked_genes_under, collapse = "\n")), file = con, sep = "\n")
+  
+  # Write the over_70 list
+  cat(paste0(">",CELL_TYPE, "_over_70\n", paste(ranked_genes_over, collapse = "\n")), file = con, sep = "\n")
+  
+  # Close the file connection
+  close(con)
+}
+
+```
+
+
+Keon's Code for running ClusterProfiler in R -> THIS WILL NOT RUN IN R < 4.1***
+```{r}
+#Because this won't run in R > 4.1, we'll run it on a different device and upload results to the SCC as object GO_plot_list - it also takes a long time to run 
+
+library(clusterProfiler)
+library(org.Hs.eg.db)
+library(enrichplot)
+
+DE_results_McLean = readRDS("DE_results_McLean")
+DE_results_MtSinai = readRDS("DE_results_MtSinai")
+
+CELL_TYPES = names(DE_results_McLean)
+
+GO_plot_list = list()
+
+for(CELL_TYPE in CELL_TYPES) {
+  GENE_LIST_UNDER = DE_results_McLean[[CELL_TYPE]]$DE_tables$DE_under %>%
+  arrange(desc(logFC)) %>% pull(logFC, genes)
+  GENE_LIST_OVER = DE_results_McLean[[CELL_TYPE]]$DE_tables$DE_over %>%
+  arrange(desc(logFC)) %>% pull(logFC, genes)
+  
+gseGO_under = clusterProfiler::gseGO(geneList = GENE_LIST_UNDER, 
+  ont = "BP", 
+  keyType = "SYMBOL", 
+  minGSSize = 15, 
+  maxGSSize = 500, 
+  pvalueCutoff = 0.05, 
+  verbose = TRUE, 
+  OrgDb = org.Hs.eg.db, 
+  pAdjustMethod = "none")
+gseGO_under_s = simplify(gseGO_under, cutoff = 0.7, by = "p.adjust", select_fun = min)
+res = gseGO_under_s@result
+GO_plot_under = enrichplot::dotplot(gseGO_under_s, showCategory = 15) +
+  scale_y_discrete(labels = function(x) str_wrap(x, width = 50)) +
+  facet_grid(~.sign) 
+
+gseGO_over = clusterProfiler::gseGO(geneList = GENE_LIST_OVER, 
+  ont = "BP", 
+  keyType = "SYMBOL", 
+  minGSSize = 15, 
+  maxGSSize = 500, 
+  pvalueCutoff = 0.05, 
+  verbose = TRUE, 
+  OrgDb = org.Hs.eg.db, 
+  pAdjustMethod = "none")
+gseGO_over_s = simplify(gseGO_over, cutoff = 0.7, by = "p.adjust", select_fun = min)
+res = gseGO_over_s@result
+GO_plot_over = enrichplot::dotplot(gseGO_over_s, showCategory = 15) +
+  scale_y_discrete(labels = function(x) str_wrap(x, width = 50)) +
+  facet_grid(~.sign) 
+
+GO_plot_combined = GO_plot_under + GO_plot_over
+
+GO_plot_list[[CELL_TYPE]] = GO_plot_combined
+}
+
+```
+
+
+
+
+
+
