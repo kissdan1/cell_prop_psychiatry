@@ -44,7 +44,7 @@ for (CELL_TYPE in CELL_TYPES) {
 
 Keon's Code for running ClusterProfiler in R -> THIS WILL NOT RUN IN R < 4.1***
 ```{r}
-#Because this won't run in R > 4.1, we'll run it on a different device and upload results to the SCC as object GO_plot_list - it also takes a long time to run 
+#Because this won't run in R > 4.1, we'll run it on a different device and upload results to the SCC as object GO_plot_list - it also takes a long time to run UPDATE: We can run this in bash if you update R there
 
 library(clusterProfiler)
 library(org.Hs.eg.db)
@@ -97,6 +97,8 @@ GO_plot_combined = GO_plot_under + GO_plot_over
 
 GO_plot_list[[CELL_TYPE]] = GO_plot_combined
 }
+
+write_rds(GO_plot_list, "/external/rprshnas01/kcni/dkiss/cell_prop_psychiatry/data/McLean_GSEA_Plots")
 
 ```
 

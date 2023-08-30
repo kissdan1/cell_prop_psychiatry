@@ -101,7 +101,7 @@ for(CELL_TYPE in CELL_TYPES) {
   over_70 = pseudobulk_metadata %>% filter(Age > 70, unique_donor_ID %in% over_70_subjects, Celltype == CELL_TYPE) %>% pull(unique_donor_ID) 
   counts_over_70 = pseudobulk %>% filter(unique_donor_ID %in% over_70, Celltype == CELL_TYPE)
   counts_over_70 = counts_over_70[, 3:ncol(counts_over_70)] %>% t() %>% as.data.frame()
-  colnames(counts_under_70) = under_70
+  colnames(counts_over_70) = over_70
   #Create DGE objects
   dge_under = DGEList(counts_under_70, genes = row.names(counts_under_70))
   min_samples <- pseudobulk_metadata %>% filter(unique_donor_ID %in% under_70_subjects, Celltype == CELL_TYPE) %>% nrow * 0.8
