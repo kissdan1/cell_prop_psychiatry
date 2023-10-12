@@ -75,9 +75,9 @@ for(CELL_TYPE in CELL_TYPES) {
   pmi =  pseudobulk_metadata %>% 
   filter(unique_donor_ID %in% USE_SUBJECTS, Celltype == CELL_TYPE) %>% 
   pull(PMI)
-  age =  pseudobulk_metadata %>% 
-  filter(unique_donor_ID %in% USE_SUBJECTS, Celltype == CELL_TYPE) %>% 
-  pull(Age)
+  #age =  pseudobulk_metadata %>% 
+  #filter(unique_donor_ID %in% USE_SUBJECTS, Celltype == CELL_TYPE) %>% 
+  #pull(Age)
   log_10_cells_per_donor =  pseudobulk_metadata %>% 
   filter(unique_donor_ID %in% USE_SUBJECTS, Celltype == CELL_TYPE) %>% 
   pull(num_cells) %>% log10()
@@ -85,7 +85,7 @@ for(CELL_TYPE in CELL_TYPES) {
   filter(unique_donor_ID %in% USE_SUBJECTS, Celltype == CELL_TYPE) %>% 
   pull(age_range), levels = c("under_70", "over_70"))
   #Create model matrix
-  design = model.matrix(~age_group + disease + age + pmi + sex + log_10_cells_per_donor)
+  design = model.matrix(~disease + pmi + sex + log_10_cells_per_donor + age_group)
   #Create count matrices
   counts = pseudobulk %>% filter(unique_donor_ID %in% USE_SUBJECTS, Celltype == CELL_TYPE)
   counts = counts[, 3:ncol(counts)] %>% t() %>% as.data.frame()
@@ -114,7 +114,7 @@ for(CELL_TYPE in names(DE_data)) {
   #Voom transform
   vm = voom(dge, design, plot = F)
   fit = lmFit(vm, design) %>% eBayes()
-  DE = topTable(fit, coef ="age_groupover_70" )
+  DE = topTable(fit, coef ="age_groupover_70", number = 20000 )
   #Plots
   volcano = DE %>% simple_volcano()
   #Append to list
@@ -122,6 +122,31 @@ for(CELL_TYPE in names(DE_data)) {
   names(joined_results) = c("results", "volcano_plot")
   DE_results[[CELL_TYPE]] = joined_results
 }
+
+
 ```
+
+Loop through results and count # of DE genes at a certain padj threshold
+```{r}
+num_genes = c()
+for(CELL_TYPE in names(DE_results)) {
+  data = DE_results[[CELL_TYPE]]$results %>% subset(adj.P.Val < 0.05)
+  ngenes = nrow(data)
+  num_genes = c(num_genes, ngenes)
+}
+
+psychencode_MGP_models = read.csv("/external/rprshnas01/kcni/dkiss/cell_prop_psychiatry/data/psychencode_MGP_models_mega")
+MGP_models_subset = psychencode_MGP_models[psychencode_MGP_models$term == "Intercept", ]
+beta_vals = MGP_models_subset[, c("cell_type", "estimate")]
+
+tibble(CELL_TYPE = names(DE_results), num_genes = num_genes) %>% view
+```
+
+
+
+
+
+
+
 
 
