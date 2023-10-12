@@ -7,7 +7,7 @@ output: html_document
 library(dplyr)
 library(tidyverse)
 library(edgeR)
-library(markerGeneProfile) 
+library(markerGeneProfile)
 library(matrixStats)
 library(cowplot)
 library(broom)
@@ -15,7 +15,6 @@ library(knitr)
 library(ggpubr)
 library(biomaRt)
 theme_set(theme_cowplot())
-        
 ```
 
 

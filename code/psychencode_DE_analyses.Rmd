@@ -378,11 +378,8 @@ Load Data // Define Variables
 pseudobulk = read.delim("/external/rprshnas01/netdata_kcni/stlab/SZBDMulticohort/pseudobulk_fine_grained.counts.tsv")
 pseudobulk_metadata = read.delim("/external/rprshnas01/netdata_kcni/stlab/SZBDMulticohort/pseudobulk_fine_grained.metadata.tsv")
 CELL_TYPES = pseudobulk_metadata$Celltype %>% unique()
-<<<<<<< HEAD
 USE_COHORT = 'MtSinai'
-=======
 USE_COHORT = 'McLean'
->>>>>>> 5ba7279da9217526bdb401774fe434181dc5c35b
 ```
 
 
