@@ -104,13 +104,13 @@ write.csv(gene_count_matrix, "/external/rprshnas01/kcni/dkiss/KCNI_data_analyses
 
 Load and format saved matrices and format for ease of access
 ```{r}
-GVEX_matrix = read.csv("GVEX_count_matrix.csv")
+GVEX_matrix = read.csv("/external/rprshnas01/kcni/dkiss/cell_prop_psychiatry/data/GVEX_count_matrix.csv")
 names(GVEX_matrix) = gsub("X", '', names(GVEX_matrix))
 names(GVEX_matrix)[1] = "gene_symbol"
-LIBD_matrix = read.csv("LIBD_count_matrix.csv")
+LIBD_matrix = read.csv("/external/rprshnas01/kcni/dkiss/cell_prop_psychiatry/data/LIBD_count_matrix.csv")
 names(LIBD_matrix) = gsub("X", '', names(LIBD_matrix))
 names(LIBD_matrix)[1] = "gene_symbol"
-CMC_matrix = read.csv("CMC_count_matrix.csv")
+CMC_matrix = read.csv("/external/rprshnas01/kcni/dkiss/cell_prop_psychiatry/data/CMC_count_matrix.csv")
 names(CMC_matrix) = gsub("X", '', names(CMC_matrix))
 names(CMC_matrix)[1] = "gene_symbol"
 
@@ -130,12 +130,12 @@ CMC_matrix = CMC_matrix[,-1]
 
 Import Metadata
 ```{r}
-GVEX_metadata = read.delim("/external/rprshnas01/netdata_kcni/stlab/PsychENCODE/BrainGVEX/RNAseq/SYNAPSE_METADATA_MANIFEST.tsv") %>% subset(dataType == "geneExpression") #%>% select(specimenID, PMI, hemisphere, pH, BrodmannArea, RIN)
-LIBD_metadata = read.delim("/external/rprshnas01/netdata_kcni/stlab/PsychENCODE/LIBD__szControl/RNAseq/SYNAPSE_METADATA_MANIFEST.tsv") %>% subset(dataType == "geneExpression") 
-CMC_metadata = read.csv("/external/rprshnas01/netdata_kcni/stlab/PsychENCODE/CMC/Metadata/SYNAPSE_TABLE_QUERY_123020650.csv")
+GVEX_metadata = read.delim("//external/rprshnas01/external_data/psychencode/PsychENCODE//BrainGVEX/RNAseq/SYNAPSE_METADATA_MANIFEST.tsv") %>% subset(dataType == "geneExpression") #%>% select(specimenID, PMI, hemisphere, pH, BrodmannArea, RIN)
+LIBD_metadata = read.delim("/external/rprshnas01/external_data/psychencode/PsychENCODE/LIBD__szControl/RNAseq/SYNAPSE_METADATA_MANIFEST.tsv") %>% subset(dataType == "geneExpression") 
+CMC_metadata = read.csv("/external/rprshnas01/external_data/psychencode/PsychENCODE/CMC/Metadata/SYNAPSE_TABLE_QUERY_123020650.csv")
 names(CMC_metadata)[names(CMC_metadata) == "Individual_ID"] = "individualID"
 
-psychencode_metadata = read.csv(("/external/rprshnas01/netdata_kcni/stlab/PsychENCODE/Metadata/CapstoneCollection_Metadata_Clinical.csv"))
+psychencode_metadata = read.csv(("//external/rprshnas01/external_data/psychencode/PsychENCODE/Metadata/CapstoneCollection_Metadata_Clinical.csv"))
 
 GVEX_metadata = GVEX_metadata %>% inner_join(psychencode_metadata)
 LIBD_metadata = LIBD_metadata %>% inner_join(psychencode_metadata)
@@ -146,7 +146,8 @@ CMC_metadata = CMC_metadata %>% inner_join(psychencode_metadata)
 Normalize and Process 
 ```{r}
 #Convert matrices to counts per million
-GVEX_cpm = cpm(GVEX_matrix, log = TRUE, prior.count = 0.1)
+GVEX_cpm = cpm(GVEX_matrix,
+               log = TRUE, prior.count = 0.1)
 LIBD_cpm = cpm(LIBD_matrix, log = TRUE, prior.count = 0.1)
 CMC_cpm = cpm(CMC_matrix, log = TRUE, prior.count = 0.1)
 
@@ -207,6 +208,8 @@ new_marker_list  = lapply(new_cell_types, function(cell_type){
 })
 names(new_marker_list) = c('Astrocyte', 'Endothelial', 'Exc_IT', 'Exc_L4_IT', 'Exc_L5_ET', 'Exc_L5/6_IT_Car3', 'Exc_L5/6_NP', 'Exc_L6_CT', 'Exc_L6b', 'Inh_LAMP5', 'Microglia', 'Oligodendrocyte', 'OPC', 'Inh_PAX6', 'Pericyte', 'Inh_PVALB', 'Inh_SST', 'Inh_VIP', 'VLMC')
 print(new_cell_types)
+
+write_rds(new_markers, "/external/rprshnas01/kcni/dkiss/cell_prop_psychiatry/data/marker_list.rds")
 ```
 
 
