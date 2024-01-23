@@ -137,9 +137,9 @@ names(CMC_metadata)[names(CMC_metadata) == "Individual_ID"] = "individualID"
 
 psychencode_metadata = read.csv(("//external/rprshnas01/external_data/psychencode/PsychENCODE/Metadata/CapstoneCollection_Metadata_Clinical.csv"))
 
-GVEX_metadata = GVEX_metadata %>% inner_join(psychencode_metadata)
-LIBD_metadata = LIBD_metadata %>% inner_join(psychencode_metadata)
-CMC_metadata = CMC_metadata %>% inner_join(psychencode_metadata)
+GVEX_metadata = GVEX_metadata %>% inner_join(psychencode_metadata) %>% filter(dataType == "geneExpression" & fileFormat == "tsv")
+LIBD_metadata = LIBD_metadata %>% inner_join(psychencode_metadata) %>% filter(dataType == "geneExpression" & fileFormat == "tsv")
+CMC_metadata = CMC_metadata %>% inner_join(psychencode_metadata)%>% filter(dataType == "geneExpression" & fileFormat == "tsv") 
 
 ```
 
@@ -319,7 +319,7 @@ names(cmc_estimations_scaled)[names(cmc_estimations_scaled) == "specimenID"] = "
 
 #Merge cell type proportions with sample metadata
 #Change column name for join
-cmc_estimations_metadata = right_join(CMC_metadata, cmc_estimations_scaled )
+cmc_estimations_metadata = right_join(CMC_metadata, cmc_estimations_scaled)
 
 #Remove '+' from ageDeath for modelling
 cmc_estimations_metadata$ageDeath = as.numeric(gsub("[+]", "", cmc_estimations_metadata$ageDeath))
@@ -328,186 +328,58 @@ write.csv(cmc_estimations_metadata, "/external/rprshnas01/kcni/dkiss/KCNI_data_a
 
 ```
 
-ggPlot visualizations
+Rerun CMC to see if cohort-specific MGP-estimate changes results:
 ```{r}
-gvex_estimations_metadata %>% ggplot(aes(x = as.numeric(ageDeath), y = Inh_SST)) + geom_point() + geom_smooth(method = "lm")
-libd_estimations_metadata %>% ggplot(aes(x = as.numeric(ageDeath), y = Inh_SST)) + geom_point() + geom_smooth(method = "lm")
 
-gvex_estimations_metadata %>% ggplot(aes(x = primaryDiagnosis, y = Inh_PVALB)) + geom_boxplot() + facet_wrap(~individualIdSource)
-libd_estimations_metadata %>% ggplot(aes(x = primaryDiagnosis, y = Inh_PVALB)) + geom_boxplot() + facet_wrap(~individualIdSource)
+mssm_individuals = CMC_metadata %>% filter(individualIdSource == "MSSM") %>% pull(individualID) %>% unique()
+penn_individuals =  CMC_metadata %>% filter(individualIdSource == "Penn") %>% pull(individualID)%>% unique()
+pitt_individuals = CMC_metadata %>% filter(individualIdSource == "Pitt") %>% pull(individualID) %>% unique()
+gene_symbol = CMC_matrix$gene_symbol
 
-gvex_estimations_metadata %>% ggplot(aes(x = primaryDiagnosis, y = Inh_PVALB)) + geom_boxplot()
-libd_estimations_metadata %>% ggplot(aes(x = primaryDiagnosis, y = Inh_PVALB)) + geom_boxplot()
+mssm_matrix = CMC_matrix[, mssm_individuals] %>% cbind(gene_symbol)
+penn_matrix = CMC_matrix[, penn_individuals] %>% cbind(gene_symbol)
+pitt_matrix = CMC_matrix[, colnames(CMC_matrix) %>% intersect(pitt_individuals)] %>% cbind(gene_symbol)
+
+matrix_names = c("mssm_matrix", "penn_matrix", "pitt_matrix")
+
+cmc_estimations_NEW = setNames(data.frame(matrix(ncol = 76, nrow = 0)), colnames(cmc_estimations_metadata))
+for(matrix in matrix_names) {
+  
+  genes_only = get(matrix) %>% subset(gene_symbol != "")
+  
+if(length(which(duplicated(genes_only$gene_symbol))) != 0){
+  genes_only = genes_only[-which(duplicated(genes_only$gene_symbol)),]
+}
+#Remove ensembl_ID and move gene names to first column 
+genes_only[,1] = genes_only$gene_symbol
+colnames(genes_only)[1] = "gene_name"
+genes_only = genes_only[, -(ncol(genes_only))]
+
+estimations =  mgpEstimate(
+  exprData = genes_only,
+  genes = new_marker_list,
+  geneColName = 'gene_name',
+  outlierSampleRemove = F, # should outlier samples removed. This is done using boxplot stats
+  geneTransform = NULL, # this is the default option for geneTransform
+  groups = NULL, # if there are experimental groups provide them here. if not desired set to NULL
+  seekConsensus = FALSE, # ensures gene rotations are positive in both of the groups
+  removeMinority = F)
+
+#Coerce estimations list into data frame 
+estimations_scaled = estimations$estimates %>% as.data.frame() %>% scale() %>% as.data.frame() %>% tibble::rownames_to_column(var = "specimenID")
+
+names(estimations_scaled)[names(estimations_scaled) == "specimenID"] = "individualID"
+
+#Merge cell type proportions with sample metadata
+#Change column name for join
+estimations_metadata = right_join(CMC_metadata, estimations_scaled )
+
+#Remove '+' from ageDeath for modelling
+estimations_metadata$ageDeath = as.numeric(gsub("[+]", "", estimations_metadata$ageDeath))
+
+cmc_estimations_NEW = rbind(cmc_estimations_NEW, estimations_metadata)
+}
+
+write.csv(cmc_estimations_NEW, "/external/rprshnas01/kcni/dkiss/cell_prop_psychiatry/data/cmc_cell_prop_NEW.csv")
 ```
-
-Modelling cell type proportion based on primary diagnosis
-```{r}
-#GVEX - Model cell type proportion based on primaryDiagnosis + covariates
-cell_types = names(gvex_estimations_metadata)[44:62]
-
-gvex_estimations_metadata$primaryDiagnosis = factor(gvex_estimations_metadata$primaryDiagnosis, levels =c('control', "Bipolar Disorder", "Schizophrenia"))
-gvex_lms = lapply(cell_types, function(cell_type){
-  lm = paste0("scale(", cell_type, ")", " ~ scale(PMI) + scale(RIN) + scale(ageDeath) + scale(pH) + primaryDiagnosis + reportedGender")
-  results = lm(lm, data = gvex_estimations_metadata) %>% tidy() %>% as.data.frame()
-  results$term = c("Intercept", "PMI", "RIN", "ageDeath", "pH", "bipolar_disorder", "schizophrenia", "genderMale")
-  results$cell_type = cell_type
-  return(results)
-}) %>% bind_rows() %>%
-  # adjust for multiple comparisons using the Benjamini-Hochberg method
-  mutate(padj = p.adjust(`p.value`, method = 'BH')) %>%
-  mutate(class = case_when(
-    str_detect(cell_type, "Inh") ~ "Inhibitory",
-    str_detect(cell_type, "Exc") ~ "Excitatory",
-    TRUE ~ "Non-Neuronal"
-  ))
-#Save model dataframe
-write_csv(gvex_lms, "/external/rprshnas01/kcni/dkiss/KCNI_data_analyses/gvex_models.csv", col_names = T)
-
-#LIBD - Model cell type proportion based on primaryDiagnosis + covariates
-libd_estimations_metadata$primaryDiagnosis = factor(libd_estimations_metadata$primaryDiagnosis, levels =c('control', "Schizophrenia"))
-libd_lms = lapply(cell_types, function(cell_type){
-  lm = paste0("scale(", cell_type, ")", " ~ scale(PMI) + scale(RIN) + scale(ageDeath) + scale(pH) + primaryDiagnosis + reportedGender")
-  results = lm(lm, data = libd_estimations_metadata) %>% tidy() %>% as.data.frame()
-  results$term = c("Intercept", "PMI", "RIN", "ageDeath", "pH", "schizophrenia", "genderMale")
-  results$cell_type = cell_type
-  return(results)
-}) %>% bind_rows() %>%
-  # adjust for multiple comparisons using the Benjamini-Hochberg method
-  mutate(padj = p.adjust(`p.value`, method = 'BH')) %>%
-  mutate(class = case_when(
-    str_detect(cell_type, "Inh") ~ "Inhibitory",
-    str_detect(cell_type, "Exc") ~ "Excitatory",
-    TRUE ~ "Non-Neuronal"
-  ))
-#Save model dataframe
-write_csv(libd_lms, "/external/rprshnas01/kcni/dkiss/KCNI_data_analyses/libd_models.csv", col_names = T)
-
-#CMC - Model cell type proportion based on primaryDiagnosis + covariates
-cmc_estimations_metadata$primaryDiagnosis = factor(cmc_estimations_metadata$primaryDiagnosis, levels =c('control', "Schizophrenia"))
-cmc_lms = lapply(cell_types, function(cell_type){
-  lm = paste0("scale(", cell_type, ")", " ~scale(RIN) + scale(ageDeath) + primaryDiagnosis + reportedGender")
-  results = lm(lm, data = cmc_estimations_metadata) %>% tidy() %>% as.data.frame()
-  results$term = c("Intercept", "RIN", "ageDeath", "schizophrenia", "genderMale")
-  results$cell_type = cell_type
-  return(results)
-}) %>% bind_rows() %>%
-  # adjust for multiple comparisons using the Benjamini-Hochberg method
-  mutate(padj = p.adjust(`p.value`, method = 'BH')) %>%
-  mutate(class = case_when(
-    str_detect(cell_type, "Inh") ~ "Inhibitory",
-    str_detect(cell_type, "Exc") ~ "Excitatory",
-    TRUE ~ "Non-Neuronal"
-  ))
-#Save model dataframe
-write_csv(cmc_lms, "/external/rprshnas01/kcni/dkiss/KCNI_data_analyses/cmc_models.csv", col_names = T)
-
-#Add study column for colour coding - combine data
-gvex_lms$study = rep("GVEX", nrow(gvex_lms))
-libd_lms$study = rep("LIBD", nrow(libd_lms))
-cmc_lms$study = rep("CMC", nrow(cmc_lms))
-combined_lms = rbind(gvex_lms, libd_lms, cmc_lms) 
-```
-
-Plotting beta coefficients per cell type for each disorder in each cohort
-```{r}
-beta_plot_gvex_scz = gvex_lms %>% 
-  filter(term %in% 'schizophrenia') %>% 
-  mutate(cell_type = fct_reorder(cell_type, estimate)) %>% 
-  ggplot(aes(x = cell_type, y = estimate)) + 
-  geom_hline(yintercept = 0) + 
-  geom_bar(stat = "identity") + 
-  geom_errorbar(aes(ymin = estimate - std.error, ymax = estimate + std.error)) + 
-  ggtitle("GVEX: Schizophrenia vs. Controls") +
-  ylab('Beta Coefficient') + 
-  xlab('Cell Type Proportions') + 
-  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
-  facet_wrap(~class, drop = T, scale = "free")
-beta_plot_gvex_scz
-
-beta_plot_gvex_bd = gvex_lms %>% 
-  filter(term %in% 'bipolar_disorder') %>% 
-  mutate(cell_type = fct_reorder(cell_type, estimate)) %>% 
-  ggplot(aes(x = cell_type, y = estimate)) + 
-  geom_hline(yintercept = 0) + 
-  geom_bar(stat = "identity") + 
-  geom_errorbar(aes(ymin = estimate - std.error, ymax = estimate + std.error)) + 
-  ggtitle("GVEX: Bipolar Disorder vs. Controls") +
-  ylab('Beta Coefficient') + 
-  xlab('Cell Type Proportions') + 
-  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
-  facet_wrap(~class, drop = T, scale = "free")
-beta_plot_gvex_bd
-
-beta_plot_libd_scz = libd_lms %>% 
-  filter(term %in% 'schizophrenia') %>% 
-  mutate(cell_type = fct_reorder(cell_type, estimate)) %>% 
-  ggplot(aes(x = cell_type, y = estimate)) + 
-  geom_hline(yintercept = 0) + 
-  geom_bar(stat = "identity") + 
-  geom_errorbar(aes(ymin = estimate - std.error, ymax = estimate + std.error)) + 
-  ggtitle("LIBD: Schizophrenia vs. Controls") +
-  ylab('Beta Coefficient') + 
-  xlab('Cell Type Proportions') + 
-  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
-  facet_wrap(~class, drop = T, scale = "free")
-beta_plot_libd_scz
-
-beta_plot_cmc_scz = cmc_lms %>% 
-  filter(term %in% 'schizophrenia') %>% 
-  mutate(cell_type = fct_reorder(cell_type, estimate)) %>% 
-  ggplot(aes(x = cell_type, y = estimate)) + 
-  geom_hline(yintercept = 0) + 
-  geom_bar(stat = "identity") + 
-  geom_errorbar(aes(ymin = estimate - std.error, ymax = estimate + std.error)) + 
-  ggtitle("CMC: Schizophrenia vs. Controls") +
-  ylab('Beta Coefficient') + 
-  xlab('Cell Type Proportions') + 
-  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
-  facet_wrap(~class, drop = T, scale = "free")
-beta_plot_cmc_scz
-
-```
-
-Further Analyses/Visualizations: Now that models have been generated for all 3 datasets, save and load into new chunk to avoid running all previous code again
-```{r, fig.height= 12, fig.width= 11}
-
-gvex_models = read.csv("/external/rprshnas01/kcni/dkiss/KCNI_data_analyses/gvex_models.csv") 
-gvex_models$study = rep("GVEX", nrow(gvex_models))
-libd_models = read.csv("/external/rprshnas01/kcni/dkiss/KCNI_data_analyses/libd_models.csv")
-libd_models$study = rep("LIBD", nrow(libd_models))
-cmc_models = read.csv("/external/rprshnas01/kcni/dkiss/KCNI_data_analyses/cmc_models.csv")
-cmc_models$study = rep("CMC", nrow(cmc_models))
-
-combined_models = rbind( gvex_models, libd_models, cmc_models)
-
-beta_plot_combined = combined_lms %>% 
-  filter(term %in% 'SCZ') %>% 
-  mutate(cell_type = fct_reorder(cell_type, estimate)) %>% 
-  ggplot(aes(x = individualIdSource, y = estimate, fill = dataset)) + 
-  geom_hline(yintercept = 0) + 
-  geom_bar(stat = "identity", position = "dodge") + 
-  geom_errorbar(aes(ymin = estimate - std.error, ymax = estimate + std.error)) + 
-  ggtitle("Schizophrenia vs. Controls") +
-  ylab('Beta Coefficient') + 
-  xlab('Study') + 
-  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
-  facet_wrap(~cell_type, drop = T, scale = "free")
-beta_plot_combined
-
-```
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 

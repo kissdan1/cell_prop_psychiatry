@@ -1,154 +1,133 @@
 ---
-title: "psychencode_DE_plots"
+title: "psychencode_DE_figure"
 author: "Daniel Kiss"
-date: "8/16/2023"
+date: "1/16/2024"
 output: html_document
 ---
 
-Create a data frame of pearson correlation data between under 70 and over 70 groups for each cell type
 ```{r}
-#Load data and initialize empty data frame
-DE_results_MtSinai = readRDS("/external/rprshnas01/kcni/dkiss/cell_prop_psychiatry/data/DE_results_MtSinai")
-DE_results_McLean = readRDS("/external/rprshnas01/kcni/dkiss/cell_prop_psychiatry/data/DE_results_McLean")
-DE_results_ALL = readRDS("/external/rprshnas01/kcni/dkiss/cell_prop_psychiatry/data/DE_results_ALL")
-#Compute pearson correlation values and save them to vectors with NA if the cell type was filtered out
-mclean_corr = c()
-mtsinai_corr = c()
-for(CELL_TYPE in CELL_TYPES) {
-  if(DE_results_McLean[[CELL_TYPE]] %>% is.null == F) {
-    tplot = DE_results_McLean[[CELL_TYPE]][['t_Plot']]
-    correlation <- cor(tplot$data$t.x, tplot$data$t.y)
-    mclean_corr = mclean_corr %>% append(correlation)
-  }
-  else {
-    mclean_corr = mclean_corr %>% append(NA)
-  }
-}
-for(CELL_TYPE in CELL_TYPES) {
-  if(DE_results_MtSinai[[CELL_TYPE]] %>% is.null == F) {
-    tplot = DE_results_MtSinai[[CELL_TYPE]][['t_Plot']]
-    correlation <- cor(tplot$data$t.x, tplot$data$t.y)
-    mtsinai_corr = mtsinai_corr %>% append(correlation)
-  }
-  else {
-    mtsinai_corr = mtsinai_corr %>% append(NA)
-  }
-}
-#Create data frame
+suppressPackageStartupMessages({
+  library(tidyverse)
+  library(Seurat)
+  library(edgeR)
+  library(ggrepel)
+  library(cowplot)
+  library(limma)
+  library(ggpubr)
+  library(gprofiler2)
+  library(EnhancedVolcano)
+  library(patchwork)
+})
+theme_set(theme_classic2())
+#Colour palette
+cbPalette <- c("#56B4E9", "#009E73","#E69F00", "#0072B2", "#D55E00", "#CC79A7","#000000","#F0E442")
+```
 
-#Avg cells per cell type 
-avg_cells = c()
+Load Data // Define Variables
+```{r}
+DE_results_ALL = readRDS("~/cell_prop_psychiatry/data/DE_results_ALL")
+pseudobulk = read.delim("/external/rprshnas01/netdata_kcni/stlab/SZBDMulticohort/pseudobulk_fine_grained.counts.tsv")
+pseudobulk_metadata = read.delim("/external/rprshnas01/netdata_kcni/stlab/SZBDMulticohort/pseudobulk_fine_grained.metadata.tsv")
+
+#Add log10 number of cells variable
+pseudobulk_metadata$log10_num_cells = log10(pseudobulk_metadata$num_cells)
+#Add age group variable
+pseudobulk_metadata =  pseudobulk_metadata %>%
+  mutate(age_group = case_when(
+    Age < 70 ~ "Under_70", Age >= 70 ~ "Over_70")) 
+pseudobulk_metadata$age_group = pseudobulk_metadata$age_group %>% factor(levels = c("Under_70", "Over_70"))
+pseudobulk_combined = left_join(pseudobulk_metadata, pseudobulk)
+
+#Convert to log2(cmp + 1) / num_cells
+genes = pseudobulk_combined[, 31:ncol(pseudobulk_combined)] %>% mutate(
+  across(everything(), ~log2(.x + 1)))
+
+pseudobulk_transformed = cbind(pseudobulk_combined[,1:30], genes)
+```
+
+Create a list of relevant data for each cell type
+```{r}
+CELL_TYPES = c("In-PV_Basket", "In-SST", "In-VIP")
+NUM_CELLS = 50
+AGE_THRESH = 70 
+no_batch_list = list()
+
+#Loop through ALL cell types and perform above analyses
 for(CELL_TYPE in CELL_TYPES) {
-  avg = pseudobulk_metadata %>% filter(Celltype == CELL_TYPE) %>%  pull(num_cells) %>% mean()
-  avg_cells = avg_cells %>% append(avg)
-}
-#L
-corr_data = data.frame(cell_type = CELL_TYPES, mtsinai_corr = mtsinai_corr, mclean_corr = mclean_corr, avg_cells = avg_cells)  %>%
-  pivot_longer(cols = mtsinai_corr:mclean_corr, names_to = 'study', values_to = 'corr') %>%  
-  mutate(class = case_when(
-    str_detect(cell_type, "In") ~ "Inhibitory",
-    str_detect(cell_type, "Ex") ~ "Excitatory",
-    T ~ "Non-Neuronal"))
+  counts_under_70 = pseudobulk_transformed %>% filter(Celltype == CELL_TYPE, age_group == "Under_70")
+  counts_over_70 = pseudobulk_transformed %>% filter(Celltype == CELL_TYPE, age_group == "Over_70")
+
+  #Create batch and covariate labels for Under_70
+  disease = factor( counts_under_70 %>% pull(Phenotype), levels = c('CON', 'SZ'))
+  sex =  counts_under_70 %>% pull(Gender)
+  pmi = counts_under_70 %>%  pull(PMI)
+  age =  counts_under_70 %>% pull(Age)
+  cohort = counts_under_70 %>% pull(Cohort)
+  log_10_cells_per_donor =  counts_under_70 %>% pull(log10_num_cells)
   
-
+  #Use variables to regress out covariates using removeBatchEffect
+  data = counts_under_70[, 31:ncol(counts_under_70)] %>% t()
+  under_70_no_batch = removeBatchEffect(x = data,
+                                       batch = sex,
+                                       batch2 = cohort,
+                                       covariates = cbind(pmi, age, log_10_cells_per_donor),
+                                       design = model.matrix(~ disease)) %>% t()
+  under_70_no_batch = cbind(counts_under_70[, 1:30], under_70_no_batch)
+  
+  #Create batch and covariate labels for Over_70
+  disease = factor(counts_over_70 %>% pull(Phenotype), levels = c('CON', 'SZ'))
+  sex =  counts_over_70 %>% pull(Gender)
+  pmi = counts_over_70 %>%  pull(PMI)
+  age =  counts_over_70 %>% pull(Age)
+  cohort = counts_over_70 %>% pull(Cohort)
+  log_10_cells_per_donor =  counts_over_70 %>% pull(log10_num_cells)
+  
+  #Use variables to regress out covariates using removeBatchEffect
+  data = counts_over_70[, 31:ncol(counts_over_70)] %>% t()
+  over_70_no_batch = removeBatchEffect(x = data,
+                                       batch = sex,
+                                       batch2 = cohort,
+                                       covariates = cbind(pmi, age, log_10_cells_per_donor),
+                                       design = model.matrix(~ disease)) %>% t()
+  over_70_no_batch = cbind(counts_over_70[, 1:30], over_70_no_batch)
+  
+  #Create lists of data for each group
+  joined_data = rbind(under_70_no_batch, over_70_no_batch) 
+  no_batch_list[[CELL_TYPE]] = joined_data
+}
 ```
-
-Let's plot corr_data
-```{r, fig.height=4, fig.width=8 }
-corr_plot = corr_data %>%
-  ggplot(aes(x = cell_type, y = corr, fill = study)) + 
-  geom_bar(stat = "identity", position = "dodge") +
-  theme(
-    axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1, size = 13), 
-    axis.title.x = element_text(vjust = 6, size = 16),
-    axis.title.y = element_text(size = 16),
-    strip.text.x = element_text(size = 16)) + 
-  facet_grid(~class, drop = T, scale = "free_x", space = "free") + 
-  ylab('Pearson Correlation - Above/Below 70') + 
-  xlab('Cell Type') 
-
-corr_plot
-
-corr_vs_avg_cells = corr_data %>% ggplot(aes(x = cell_type, y = avg_cells)) + geom_bar(stat = "identity", position = "dodge") +
-  theme(
-    axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1, size = 13), 
-    axis.title.x = element_text(vjust = 6, size = 16),
-    axis.title.y = element_text(size = 16),
-    strip.text.x = element_text(size = 16)) + 
-  facet_grid(~class, drop = T, scale = "free_x", space = "free")
-corr_vs_avg_cells
-#Adjust for cohorts -> add median instead of mean -> corr between this and pearson from previous graph
-
-#Save to plots folder
-output_filename <- "~/cell_prop_psychiatry/plots/corr_plot.jpg"
-
-# Use ggsave to save the plot as a JPG image
-ggsave(output_filename, corr_plot, width = 8, height = 5, dpi = 300)
-```
-
-
 
 
 Plot mRNA expression for main interneuron subtypes and their corresponding marker genes
-```{r}
-
-
-#Convert to log2(cmp + 1) / num_cells
-genes = pseudobulk_combined[, 32:ncol(pseudobulk_combined)] %>% mutate(
-  across(everything(), ~log2(.x + 1)))
-
-pseudobulk_transformed = cbind(pseudobulk_combined[,1:31], genes)
-#Log10 transform number of cells
-pseudobulk_transformed$num_cells = log10(pseudobulk_transformed$num_cells)
-
-#Add age group variable
-pseudobulk_transformed =  pseudobulk_transformed %>%
-  mutate(age_group = case_when(
-    Age < 70 ~ "Under_70", Age >= 70 ~ "Over_70")) 
-pseudobulk_transformed$age_group = pseudobulk_transformed$age_group %>% factor(levels = c("Under_70", "Over_70"))
-
-  
-```
-
-Residualize mRNA counts using removeBatchEffect
-```{r}
-pseudobulk_no_batch = pseudobulk_transformed[, 32:ncol(pseudobulk_transformed)] %>% removeBatchEffect(covariates = pseudobulk_transformed[, c("Gender", "Age", "PMI", "num_cells")])
-
-```
-
-
 ```{r, fig.height= 12, fig.width= 7}
 #Create separate plots for each cell type
-SST_mRNA = pseudobulk_transformed %>% 
-  subset(Celltype == "In-SST", num_cells >= 20) %>%
+SST_mRNA = no_batch_list$`In-SST` %>%
   ggplot(aes(x = Phenotype, y = SST)) +
   geom_boxplot(outlier.shape = NA, show.legend = F) +
   facet_grid(~age_group, drop = T, scales = "free_y") +
   theme(text = element_text(size = 18)) +
-  coord_cartesian(ylim = c(0, 15)) +
+  coord_cartesian(ylim = c(-8, 6)) +
   ylab('log2(cpm + 1)') + 
-  geom_signif(comparisons = list(c("CON", "SZ")), map_signif_level = TRUE, y_position = 12)
+  geom_signif(comparisons = list(c("CON", "SZ")), map_signif_level = TRUE, y_position = 4)
 
-PVALB_mRNA = pseudobulk_transformed %>% 
-  subset(Celltype == "In-PV_Basket", num_cells >= 20) %>%
+PVALB_mRNA = no_batch_list$`In-PV_Basket` %>% 
   ggplot(aes(x = Phenotype, y = PVALB)) +
   geom_boxplot(outlier.shape = NA, show.legend = F) +
   facet_grid(~age_group, drop = T, scales = "free_y") +
   theme(text = element_text(size = 18)) +
-  coord_cartesian(ylim = c(0, 15)) +
+  coord_cartesian(ylim = c(-8, 3)) +
   ylab('log2(cpm + 1)') + 
-  geom_signif(comparisons = list(c("CON", "SZ")), map_signif_level = TRUE, y_position = 12)
+  geom_signif(comparisons = list(c("CON", "SZ")), map_signif_level = TRUE, y_position = 2)
 
 
-VIP_mRNA = pseudobulk_transformed %>% 
-  subset(Celltype == "In-VIP", num_cells >= 20) %>%
+VIP_mRNA = no_batch_list$`In-VIP` %>%
   ggplot(aes(x = Phenotype, y = VIP)) +
   geom_boxplot(outlier.shape = NA, show.legend = F) +
   facet_grid(~age_group, drop = T, scales = "free_y") +
   theme(text = element_text(size = 18)) +
-  coord_cartesian(ylim = c(0, 15)) +
+  coord_cartesian(ylim = c(-3, 5)) +
   ylab('log2(cpm + 1)') + 
-  geom_signif(comparisons = list(c("CON", "SZ")), map_signif_level = TRUE, y_position = 12)
+  geom_signif(comparisons = list(c("CON", "SZ")), map_signif_level = TRUE, y_position = 4)
 
 
 mRNA_figure = SST_mRNA / PVALB_mRNA / VIP_mRNA + 
@@ -175,14 +154,14 @@ Function to create a volcano plot and highlight genes in a gene list:
 -Highlights non-significant marker genes in red and significant marker genes in blue
 ```{r}
 MGPVolcano <- function(matrix, marker_genes) {
-  significant_genes <- subset(matrix, abs(logFC) > 1 & P.Value < 0.05)
-  significant_marker_genes <- subset(matrix, genes %in% marker_genes & abs(logFC) > 1 & P.Value < 0.05)
+  significant_genes <- subset(matrix, abs(logFC) > 1 & P.Value < 0.1)
+  significant_marker_genes <- subset(matrix, genes %in% marker_genes & abs(logFC) > 1 & P.Value < 0.1)
   matrix %>%
     ggplot(aes(x = logFC, y = -log10(P.Value), label = genes)) + 
     geom_point(alpha = 0.3) +
     geom_vline(xintercept = -1, linetype = "dotted") +
     geom_vline(xintercept = 1, linetype = "dotted") +
-    geom_hline(yintercept = -log10(0.05), linetype = "dotted") +
+    geom_hline(yintercept = -log10(0.1), linetype = "dotted") +
     geom_label_repel(data = significant_marker_genes, 
                      aes(label = genes), 
                      box.padding = 0.35, 
