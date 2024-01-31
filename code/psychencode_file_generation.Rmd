@@ -209,7 +209,7 @@ new_marker_list  = lapply(new_cell_types, function(cell_type){
 names(new_marker_list) = c('Astrocyte', 'Endothelial', 'Exc_IT', 'Exc_L4_IT', 'Exc_L5_ET', 'Exc_L5/6_IT_Car3', 'Exc_L5/6_NP', 'Exc_L6_CT', 'Exc_L6b', 'Inh_LAMP5', 'Microglia', 'Oligodendrocyte', 'OPC', 'Inh_PAX6', 'Pericyte', 'Inh_PVALB', 'Inh_SST', 'Inh_VIP', 'VLMC')
 print(new_cell_types)
 
-write_rds(new_markers, "/external/rprshnas01/kcni/dkiss/cell_prop_psychiatry/data/marker_list.rds")
+write_rds(new_marker_list, "/external/rprshnas01/kcni/dkiss/cell_prop_psychiatry/data/marker_list.rds")
 ```
 
 

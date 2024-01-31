@@ -1,0 +1,64 @@
+---
+title: "Untitled"
+author: "Daniel Kiss"
+date: "1/24/2024"
+output: html_document
+---
+```{r}
+#Load seurat object
+query = readRDS('/external/rprshnas01/netdata_kcni/stlab/Xiaolin/cell_deconv_data/PsychEncode_label_transfer_result_empty_removed.RData')
+# get counts matrix
+query_matrix = readRDS('/external/rprshnas01/netdata_kcni/stlab/Xiaolin/cell_deconv_data/counts_sn.RData')
+
+```
+
+```{r}
+#Cell-level metadata
+query_metadata = query@meta.data
+query_metadata = query_metadata[,-1]%>%
+  mutate(subclass_label = predicted.id) %>%
+  # remove missing subclass labels 
+  filter(!(subclass_label == "" | is.na(subclass_label))) %>%
+  # column for each unique subject and cell type (don't save as factor)
+  mutate(pseudobulk_group = as.character(interaction(Phenotype, subclass_label))) %>%
+  # number of cells per subtype
+  group_by(Phenotype, subclass_label) %>%
+  mutate(n_cells = n()) %>%
+  as.data.frame()
+rownames(query_metadata) = query_metadata$cell_id
+```
+
+```{r}
+pseudobulk_metadata = query_metadata %>%
+  # collapse by sample to get metadata that matches the dimensions of the pseudobulk matrix 
+  dplyr::select(Phenotype, subclass_label, pseudobulk_group, n_cells) %>%
+  distinct(pseudobulk_group, .keep_all = TRUE) %>%
+  # drop subclasses if one of the samples (conditions) has <20 cells 
+  group_by(subclass_label) %>%
+  filter(all(n_cells >= 20)) %>%
+  as.data.frame()
+rownames(pseudobulk_metadata) = NULL
+
+# filter out droppped subclasses from cell-level metadata
+query_metadata = query_metadata %>% 
+  filter(pseudobulk_group %in% pseudobulk_metadata$pseudobulk_group,
+         subclass_label %in% pseudobulk_metadata$subclass_label)
+```
+
+```{r}
+# match counts to cell-level metadata
+query_matrix = query_matrix[,match(query_metadata$cell_id, colnames(query_matrix))]
+# check
+all(rownames(query_metadata) == colnames(query_matrix))
+
+# get pseudobulks
+mm = model.matrix(~ 0 + pseudobulk_group, query_metadata)
+pseudobulk_matrix = as.matrix(query_matrix %*% mm)
+# clean column names 
+colnames(pseudobulk_matrix) = gsub("pseudobulk_group", "", colnames(pseudobulk_matrix))
+```
+
+
+
+
+

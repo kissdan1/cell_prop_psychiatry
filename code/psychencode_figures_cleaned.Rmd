@@ -29,48 +29,17 @@ cbPalette = c("#56B4E9", "#009E73","#E69F00", "#0072B2", "#D55E00", "#CC79A7","#
 
 Loading Data
 ```{r}
-#Metadata for individual cohorts + Psychencode -> Merge for ease of access
-GVEX_metadata = read.delim("/external/rprshnas01/external_data/psychencode/PsychENCODE/BrainGVEX/RNAseq/SYNAPSE_METADATA_MANIFEST.tsv") %>% subset(dataType == "geneExpression") #%>% select(specimenID, PMI, hemisphere, pH, BrodmannArea, RIN)
-LIBD_metadata = read.delim("/external/rprshnas01/external_data/psychencode/PsychENCODE/LIBD__szControl/RNAseq/SYNAPSE_METADATA_MANIFEST.tsv") %>% subset(dataType == "geneExpression") 
-CMC_metadata = read.delim("/external/rprshnas01/external_data/psychencode/PsychENCODE/CMC/Metadata/SYNAPSE_METADATA_MANIFEST.tsv") %>% subset(dataType == "geneExpression")
-psychencode_metadata = read.csv(("/external/rprshnas01/external_data/psychencode/PsychENCODE/Metadata/CapstoneCollection_Metadata_Clinical.csv"))
-GVEX_metadata = GVEX_metadata %>% inner_join(psychencode_metadata)
-LIBD_metadata = LIBD_metadata %>% inner_join(psychencode_metadata)
-CMC_metadata = CMC_metadata %>% inner_join(psychencode_metadata)
-
 #Cell type proportions for each data set merged with metadata - ready for modelling 
-gvex_estimations = read.csv("/external/rprshnas01/kcni/dkiss/cell_prop_psychiatry/data/gvex_cell_prop.csv")
-gvex_estimations$dataset = rep("GVEX", nrow(gvex_estimations))
-libd_estimations = read.csv("/external/rprshnas01/kcni/dkiss/cell_prop_psychiatry/data/libd_cell_prop.csv")
-libd_estimations$dataset = rep("LIBD", nrow(libd_estimations))
-libd_estimations[which(is.na(libd_estimations$individualIdSource)), 'individualIdSource'] = 'LIBD_szControl'
-cmc_estimations = read.csv("/external/rprshnas01/kcni/dkiss/cell_prop_psychiatry/data/cmc_cell_prop.csv")
-cmc_estimations$dataset = rep("CMC", nrow(cmc_estimations))
-
+all_estimations = read_csv( "/external/rprshnas01/kcni/dkiss/cell_prop_psychiatry/data/psychencode_mgp_estimations.csv")
+all_estimations$newStudy = all_estimations$newStudy %>% factor(levels = c("GVEX", "NIMH_HBCC","Pitt", "LIBD_szControl", "MSSM", "Penn"))
+all_estimations = all_estimations %>% filter(ageDeath >= 15)
+all_estimations_long = all_estimations %>% pivot_longer(cols = Astrocyte:VLMC, names_to = 'cell_type', values_to = 'rel_prop') 
 #Load single cell samples 
 psychencode_snCTPs = read_csv('/external/rprshnas01/netdata_kcni/stlab/cross_cohort_MGPs/psychencode_snCTPs.csv') 
 ```
 
-Combine all MGP data into a single df
 ```{r}
-all_estimations = bind_rows(bind_rows(gvex_estimations, libd_estimations), cmc_estimations)
-all_estimations$primaryDiagnosis = factor(all_estimations$primaryDiagnosis, levels =c('control', "Schizophrenia", "Bipolar Disorder"))
-all_estimations = all_estimations %>% filter(!is.na(individualIdSource), !is.na(primaryDiagnosis),individualIdSource != 'BSHRI', ageDeath >= 15)
-
-#It appears that SMRI cohorts have very few subjects after filtering. Create a new column (new_study) that collapses SMRI cohorts back into GVEX, whilst keeping all other cohorts on their own. 
-new_study = all_estimations$individualIdSource 
-new_study[grepl("SMRI", new_study)] = "GVEX"
-all_estimations$newStudy = new_study %>% factor(levels = c("GVEX", "NIMH_HBCC","Pitt", "LIBD_szControl", "MSSM", "Penn"))
-
-#all_estimations = all_estimations %>% mutate(individualIdSource = recode(individualID, NA ="LIBD"))
-all_estimations_long = all_estimations %>% pivot_longer(cols = Astrocyte:VLMC, names_to = 'cell_type', values_to = 'rel_prop') 
-  
-```
-
-
-Model cell type proportion based on psychiatric diagnosis
-```{r}
-combined_lms = all_estimations_long %>% filter(primaryDiagnosis %in% c('Schizophrenia', "control")) %>%
+combined_lms = all_estimations_long %>%
   # group stacked data by cell_type
   group_by(newStudy, cell_type) %>%
   # fit all the cell_type_prop data according to the model
@@ -128,7 +97,7 @@ interaction_lms <- all_estimations_long %>%
 
 Meganalysis w/ all data 
 ```{r}
-mega_lms <- all_estimations_long %>%  filter(primaryDiagnosis %in% c('Schizophrenia', "control")) %>%
+mega_lms <- all_estimations_long %>% 
   group_by(cell_type) %>%
   do(tidy(lm(scale(rel_prop) ~ scale(RIN) + scale(ageDeath) + scale(PMI) +
              reportedGender + primaryDiagnosis + newStudy + scale(ageDeath) * primaryDiagnosis, data = .))) %>%
@@ -278,7 +247,6 @@ ss_mega_lms <- snCTPs_long %>% filter(total_cell_counts >= 500) %>%
 
 ```
 
-
 Single Cell Meganalysis based on age +/- 70
 ```{r}
 ss_mega_lms_by_age <- snCTPs_long %>% filter(total_cell_counts >= 500) %>%
@@ -306,14 +274,13 @@ Create a table of mean cohort ages, stratified by diagnosis
 ```{r}
 #Adding cohort ages - stratified by diagnosis
 mean_ageDeath = all_estimations_long %>%
-    filter(primaryDiagnosis %in% c("control", "Schizophrenia")) %>%
     group_by(newStudy, primaryDiagnosis) %>%
     summarize(mean_ageDeath = mean(ageDeath, na.rm = TRUE)) %>%
   rename(
     Cohort = newStudy,
     Diagnosis = primaryDiagnosis,
     `Mean ageDeath` = mean_ageDeath) %>%
-  mutate(Cohort = factor(Cohort, levels = c("Pitt", "GVEX", "NIMH_HBCC", "LIBD_szControl", "MSSM", "Penn"))) %>%
+  mutate(Cohort = factor(Cohort, levels = c("GVEX", "NIMH_HBCC","Pitt", "LIBD_szControl", "MSSM", "Penn"))) %>%
   arrange(Cohort) %>% as.data.frame()
 mean_ageDeath$Diagnosis <- recode(mean_ageDeath$Diagnosis,
                                    "control" = "CON",
@@ -327,30 +294,30 @@ mean_ageDeath$`Mean ageDeath` <- format(round(mean_ageDeath$`Mean ageDeath`, 1),
 Figure 1: Illustrating the association between cell prop and diagnosis and cohort specific differences
 ```{r, fig.height=13, fig.width=11 }
 # Figure 1a: Results from SCZ meganalysis stratified by cell class
-significant_mega <- subset(mega_lms, padj <= 0.05 & term == "SCZ")
-significant_mega$asterisks <- ifelse(significant_mega$padj <= 0.001, "***",
-                                   ifelse(significant_mega$padj <= 0.01, "**", "*"))
-significant_mega$vjust <- ifelse(significant_mega$estimate >= 0, -3, 3.5)
-
-figure_1a <- mega_lms %>% 
-  filter(term %in% 'SCZ') %>% 
-  ggplot(aes(x = cell_type, y = estimate)) + 
-  geom_hline(yintercept = 0) + 
-  geom_bar(stat = "identity", position = "dodge") + 
-  facet_grid(~class, drop = T, scale = "free_x", space = "free") +
-  geom_errorbar(aes(ymin = estimate - std.error, ymax = estimate + std.error)) + 
-  ylab('Beta Coefficient') + 
-  xlab('Cell Type') + 
-  geom_text(data = significant_mega,
-            aes(cell_type, estimate, label = asterisks), 
-            vjust = significant_mega$vjust) +
-  theme(
-    axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1, size = 13), 
-    axis.title.x = element_text(vjust = 6, size = 16),
-    axis.title.y = element_text(size = 16),
-    strip.text.x = element_text(size = 16)) +
-  guides(fill = FALSE) +
-  scale_y_continuous(limits = c(-0.25, 0.42))
+# significant_mega <- subset(mega_lms, padj <= 0.05 & term == "SCZ")
+# significant_mega$asterisks <- ifelse(significant_mega$padj <= 0.001, "***",
+#                                    ifelse(significant_mega$padj <= 0.01, "**", "*"))
+# significant_mega$vjust <- ifelse(significant_mega$estimate >= 0, -3, 3.5)
+# 
+# figure_1a <- mega_lms %>% 
+#   filter(term %in% 'SCZ') %>% 
+#   ggplot(aes(x = cell_type, y = estimate)) + 
+#   geom_hline(yintercept = 0) + 
+#   geom_bar(stat = "identity", position = "dodge") + 
+#   facet_grid(~class, drop = T, scale = "free_x", space = "free") +
+#   geom_errorbar(aes(ymin = estimate - std.error, ymax = estimate + std.error)) + 
+#   ylab('Beta Coefficient') + 
+#   xlab('Cell Type') + 
+#   geom_text(data = significant_mega,
+#             aes(cell_type, estimate, label = asterisks), 
+#             vjust = significant_mega$vjust) +
+#   theme(
+#     axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1, size = 13), 
+#     axis.title.x = element_text(vjust = 6, size = 16),
+#     axis.title.y = element_text(size = 16),
+#     strip.text.x = element_text(size = 16)) +
+#   guides(fill = FALSE) +
+#   scale_y_continuous(limits = c(-0.25, 0.42))
 
 # Figure 1b: Cohort-specific beta values in SST, PVALB, VIP(?)
 # Add meganalysis data to combined_lms
