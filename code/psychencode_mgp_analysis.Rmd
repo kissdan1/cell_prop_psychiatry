@@ -60,9 +60,9 @@ combined_matrix = cbind(GVEX_matrix, LIBD_matrix, CMC_matrix)
 
 Load and format metadata
 ```{r}
-psychencode_metadata = read.csv(("//external/rprshnas01/external_data/psychencode/PsychENCODE/Metadata/CapstoneCollection_Metadata_Clinical.csv"))
+psychencode_metadata = read.csv(("/external/rprshnas01/external_data/psychencode/PsychENCODE/Metadata/CapstoneCollection_Metadata_Clinical.csv"))
 
-GVEX_metadata = read.delim("//external/rprshnas01/external_data/psychencode/PsychENCODE//BrainGVEX/RNAseq/SYNAPSE_METADATA_MANIFEST.tsv") %>% filter(dataType == "geneExpression")  %>% left_join(psychencode_metadata)
+GVEX_metadata = read.delim("/external/rprshnas01/external_data/psychencode/PsychENCODE//BrainGVEX/RNAseq/SYNAPSE_METADATA_MANIFEST.tsv") %>% filter(dataType == "geneExpression")  %>% left_join(psychencode_metadata)
 LIBD_metadata = read.delim("/external/rprshnas01/external_data/psychencode/PsychENCODE/LIBD__szControl/RNAseq/SYNAPSE_METADATA_MANIFEST.tsv") %>% filter(dataType == "geneExpression")  %>% left_join(psychencode_metadata)
 CMC_metadata = read.csv("/external/rprshnas01/external_data/psychencode/PsychENCODE/CMC/Metadata/SYNAPSE_TABLE_QUERY_123020650.csv") %>% filter(dataType == "geneExpression", fileFormat == "tsv")  %>% left_join(psychencode_metadata)
 names(CMC_metadata)[names(CMC_metadata) == "Individual_ID"] = "individualID"
@@ -72,9 +72,11 @@ LIBD_metadata[which(is.na(LIBD_metadata$individualIdSource)), 'individualIdSourc
 
 columns = names(GVEX_metadata) %>% intersect(names(LIBD_metadata)) %>% intersect(names(CMC_metadata))
 #Combine all metadata, filter based on inclusion criteria, and add newStudy column for cohort-based MGP
-combined_metadata = rbind(GVEX_metadata[, columns], LIBD_metadata[, columns], CMC_metadata[, columns])%>% filter(!is.na(individualIdSource), primaryDiagnosis %in% c("control", "Schizophrenia"), ageDeath >= 15)
-#Additional filtering to remove duplicates from Pitt and GVEX
-combined_metadata = combined_metadata %>% filter(!grepl("_BP_", specimenID), contributingStudy != "[\"BrainGVEX\"]", contributingStudy != "[\"LIBD_szControl\"]")
+combined_metadata = rbind(GVEX_metadata[, columns], LIBD_metadata[, columns], CMC_metadata[, columns])
+#Remove '+' from ageDeath for estimation/filtering
+combined_metadata$ageDeath = as.numeric(gsub("[+]", "", combined_metadata$ageDeath))
+#Additional filtering 
+combined_metadata = combined_metadata %>% filter(!grepl("_BP_", specimenID), contributingStudy != "[\"BrainGVEX\"]", contributingStudy != "[\"LIBD_szControl\"]", !is.na(individualIdSource), primaryDiagnosis %in% c("control", "Schizophrenia"), ageDeath >= 15)
 #Create newStudy column for filtering
 combined_metadata = combined_metadata %>%
   mutate(newStudy = case_when(
@@ -104,7 +106,6 @@ combined_metadata = combined_metadata %>%
     newStudy == "LIBD_szControl"                         ~ "LIBD_szControl",
     TRUE                                                 ~ NA_character_
   ))
-
 #Create cohort specific matrices
 libd_samples = combined_metadata %>% filter(newStudy == "LIBD_szControl") %>% pull(standardID)
 nimh_samples = combined_metadata %>% filter(newStudy == "NIMH_HBCC") %>% pull(standardID)
@@ -150,8 +151,9 @@ new_marker_list  = lapply(new_cell_types, function(cell_type){
     pull(ensembl_id)
   return(cell_type_marker_list)
 })
-names(new_marker_list) = c('Astrocyte', 'Endothelial', 'Exc_IT', 'Exc_L4_IT', 'Exc_L5_ET', 'Exc_L5/6_IT_Car3', 'Exc_L5/6_NP', 'Exc_L6_CT', 'Exc_L6b', 'Inh_LAMP5', 'Microglia', 'Oligodendrocyte', 'OPC', 'Inh_PAX6', 'Inh_PVALB', 'Pericyte', 'Inh_SST', 'Inh_VIP', 'VLMC')
+names(new_marker_list) = new_cell_types
 print(new_cell_types)
+write.csv(new_markers, "~/cell_prop_psychiatry/data/MGP_markers.csv")
 ```
 
 Normalize and process count matrices and perform MGP analysis
@@ -189,9 +191,6 @@ estimations_metadata <- right_join(combined_metadata, estimations_scaled, by = "
 
 #Merge cell type proportions with sample metadata
 estimations_metadata = right_join(combined_metadata, estimations_scaled )
-
-#Remove '+' from ageDeath for modelling
-estimations_metadata$ageDeath = as.numeric(gsub("[+]", "", estimations_metadata$ageDeath))
 
 mgp_estimations = rbind(mgp_estimations, estimations_metadata) 
 }

@@ -1,0 +1,106 @@
+---
+title: "psychencode_DE_forest_plots"
+author: "Daniel Kiss"
+date: "2/20/2024"
+output: html_document
+---
+
+
+```{r}
+DE_results_ALL = readRDS("~/cell_prop_psychiatry/data/DE_results_ALL")
+DE_results_McLean = readRDS("~/cell_prop_psychiatry/data/DE_results_McLean")
+DE_results_MtSinai = readRDS("~/cell_prop_psychiatry/data/DE_results_MtSinai")
+
+markers = read.csv("~/cell_prop_psychiatry/data/MGP_markers.csv")
+SST_markers = markers %>% filter(subclass == "SST") %>% pull(gene)
+PVALB_markers = markers %>% filter(subclass == "PVALB") %>% pull(gene)
+VIP_markers = markers %>% filter(subclass == "VIP") %>% pull(gene)
+
+cbPalette = cbPalette <- c("#56B4E9", "#009E73", "#E69F00", "#0072B2", 
+               "#D55E00", "#CC79A7", "#000000", "#8B4513", 
+               "#FFB6C1", "#6A5ACD", "#7FFF00")
+```
+
+
+```{r}
+CELL_TYPES = c("SST", "PVALB", "VIP")
+DATASET = c("McLean") #Vector of dataset names (can be length = 1)
+
+if (length(DATASET) > 1) {
+  DE_results <- DE_results_ALL
+} else {
+  DE_results <- get(paste0("DE_results_", DATASET))
+}
+
+```
+
+
+Function to generate forest plot
+```{r}
+generateForestPlot <- function(matrix, marker_genes) {
+  # Ensure cbPalette is defined outside this function or passed as an argument
+  marker_data <- matrix[matrix$genes %in% marker_genes, ]
+  
+    ggplot(marker_data, aes(x = logFC, y = reorder(genes, logFC), xmin = CI.L, xmax = CI.R, color = genes)) +
+    geom_point(size = 4) +  # Dot size
+    geom_errorbarh(aes(height = 0.2), size = 1) +  # Line and cap size
+    geom_vline(xintercept = 0, linetype = "dotted") +
+    scale_color_manual(values = cbPalette) +
+    xlab("Log Fold Change") + ylab("Gene") +
+    theme(
+      axis.title = element_text(size = 20), # Axis labels size
+      axis.text.x = element_text(size = 14), # Smaller x-axis tick text
+      axis.text.y = element_text(size = 14), # Smaller gene names (y-axis text)
+      legend.title = element_blank(),
+      legend.text = element_text(size = 16), # Legend text size
+      plot.title = element_text(size = 22, face = "bold"), # Plot title size if added
+      strip.text = element_text(size = 18) # Facet strip text size if used
+    )
+}
+
+```
+
+Generate plots
+```{r}
+SST_forest_under = generateForestPlot(DE_results$SST$DE_tables$DE_under, SST_markers)
+SST_forest_over = generateForestPlot(DE_results$SST$DE_tables$DE_over, SST_markers)
+PVALB_forest_under = generateForestPlot(DE_results$PVALB$DE_tables$DE_under, PVALB_markers)
+PVALB_forest_over = generateForestPlot(DE_results$PVALB$DE_tables$DE_over, PVALB_markers)
+VIP_forest_under = generateForestPlot(DE_results$VIP$DE_tables$DE_under, VIP_markers)
+VIP_forest_over = generateForestPlot(DE_results$VIP$DE_tables$DE_over, VIP_markers)
+```
+
+Combine into final DE_forest
+```{r, fig.height= 18, fig.width= 16}
+#Define plot title
+dataset_title = if(length(DATASET) > 1) paste(DATASET, collapse = " & ") else DATASET
+
+#Combine plots
+SST_combined = SST_forest_under + SST_forest_over + plot_layout(widths = c(3,3)) + 
+               plot_annotation(title = "SST", theme = theme(plot.title = element_text(hjust = 0.5, size = 22, face = "bold"), plot.margin = margin(t = 25, unit = "pt")))
+
+PVALB_combined = PVALB_forest_under + PVALB_forest_over + plot_layout(widths = c(3,3)) + 
+               plot_annotation(title = "PVALB", theme = theme(plot.title = element_text(hjust = 0.5, size = 22, face = "bold"), plot.margin = margin(t = 25, unit = "pt")))
+
+VIP_combined = VIP_forest_under +VIP_forest_over + plot_layout(widths = c(3,3)) + 
+               plot_annotation(title = "VIP", theme = theme(plot.title = element_text(hjust = 0.5, size = 22, face = "bold"), plot.margin = margin(t = 25, unit = "pt")))
+
+DE_forest = ggarrange(SST_combined, PVALB_combined, VIP_combined,
+                      labels = c("A", "B", "C"),
+                      ncol = 1, nrow = 3,
+                      font.label = list(size = 32, face = "bold")) %>% 
+                      annotate_figure(top = text_grob(paste("Marker Gene Expression -", dataset_title), size = 28, face = "bold"))
+
+
+#Save to plots folder
+dataset_suffix = if(length(DATASET) > 1) "ALL" else DATASET
+output_filename <- paste0("~/cell_prop_psychiatry/plots/DE_forest_", dataset_suffix ,".jpg")
+ggsave(output_filename, DE_forest, width = 16, height = 18, dpi = 300)
+```
+
+
+
+
+
+
+

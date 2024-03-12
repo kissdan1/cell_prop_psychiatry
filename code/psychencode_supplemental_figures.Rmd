@@ -1,0 +1,147 @@
+---
+title: "psychencode_supplemental_figures"
+author: "Daniel Kiss"
+date: "3/7/2024"
+output: html_document
+---
+
+Packages etc.
+```{r}
+library(dplyr)
+library(tidyverse)
+library(edgeR)
+library(markerGeneProfile) 
+library(matrixStats)
+library(cowplot)
+library(broom)
+library(knitr)
+library(ggpubr)
+library(biomaRt)
+library(ggrepel)
+library(patchwork)
+library(ggsignif)
+library(modelr)
+library(ggbeeswarm)
+library(lemon)
+theme_set(theme_classic2())
+#Colour palette
+cbPalette = c("#56B4E9", "#009E73","#E69F00", "#0072B2", "#D55E00", "#CC79A7","#000000","#F0E442")
+```
+
+Loading Data
+```{r}
+#Cell type proportions for each data set merged with metadata - ready for modelling 
+acc_estimations = read_csv("/external/rprshnas01/kcni/dkiss/cell_prop_psychiatry/data/cmc_acc_mgp_estimations.csv") %>% filter(primaryDiagnosis %in% c("control", "Schizophrenia"))
+acc_estimations_long = acc_estimations %>% pivot_longer(cols = Astrocyte:VLMC, names_to = 'cell_type', values_to = 'rel_prop') %>%
+  mutate(cell_class = case_when(
+    cell_type %in% c("LAMP5", "PAX6", "PVALB", "SST", "VIP") ~ "Inhibitory",
+    cell_type %in% c("IT", "L4.IT", "L5.ET", "L5.6.IT.Car3", "L5.6.NP", "L6.CT", "L6b") ~ "Excitatory",
+    TRUE ~ "Non-Neuronal"
+  ))
+#Load Sibille Lab microscopy
+microCTPs = read_csv('/external/rprshnas01/netdata_kcni/stlab/cross_cohort_MGPs/sibille_lab_cell_fractions.csv') 
+
+```
+
+Model rCTPs based on diagnosis and covariates separately in each cohort
+```{r}
+acc_combined_lms = acc_estimations_long %>%
+  group_by(newStudy, cell_type) %>%
+  do(tidy(lm(scale(rel_prop) ~ scale(RIN) + scale(ageDeath) +
+               reportedGender + primaryDiagnosis, data = .))) %>%
+  ungroup() %>%
+  mutate(padj = p.adjust(p.value, method = 'fdr'),
+         term = recode(term,
+                       `(Intercept)` = "Intercept",
+                       `reportedGendermale` = "gender:Male",
+                       `primaryDiagnosisSchizophrenia` = "SCZ",
+                       `scale(ageDeath)` = "Age",
+                       `scale(PMI)` = "PMI",
+                       `scale(RIN)` = "RIN")) %>%
+  merge(unique(acc_estimations_long[c('dataset', 'newStudy')]), by.x = "newStudy") %>%
+  merge(unique(acc_estimations_long[c('cell_class', 'cell_type')]), by.x = "cell_type") %>%
+  mutate(newStudy = factor(newStudy, levels = c("Pitt", "MSSM", "Penn")))
+```
+
+Interaction mega-analysis w/ all data 
+```{r}
+acc_mega_lms = acc_estimations_long %>% 
+  group_by(cell_type) %>%
+  do(tidy(lm(scale(rel_prop) ~ scale(RIN) + scale(ageDeath) +
+             reportedGender + primaryDiagnosis + newStudy + scale(ageDeath)*primaryDiagnosis, data = .))) %>%
+  ungroup() %>% 
+  mutate(padj = p.adjust(`p.value`, method = 'fdr'),
+         term = recode(term,
+                       `(Intercept)` = "Intercept",
+                       `reportedGendermale` = "gender:Male",
+                       `primaryDiagnosisSchizophrenia` = "SCZ",
+
+                       `scale(ageDeath)` = "Age",
+                       `scale(ageDeath):primaryDiagnosisSchizophrenia` = "Age x Diagnosis",
+                       `scale(PMI)` = "PMI", 
+                       `newStudyNIMH_HBCC` = "NIMH_HBCC",
+                       `newStudyLIBD_szControl` = "LIBD_szControl",
+                       `newStudyPitt` = "Pitt",
+                       `newStudyMSSM` = "MSSM",
+                       `newStudyPenn` = "Penn",
+                       `scale(RIN)` = "RIN")) %>%
+  merge(unique(mgp_estimations_long[c('cell_class', 'cell_type')]), by.x = "cell_type") 
+```
+
+Functions to  generate age range bins 
+```{r}
+# Create function to map age to age range
+age_to_range = function(age) {
+    if(age >= 15 & age < 20) {
+    return("15-19")
+  } else {
+    lower_bound = floor((age - 20) / 10) * 10 + 20
+    upper_bound = lower_bound + 9
+    return(paste0(lower_bound, "-", upper_bound))
+  }
+}
+# Create function to bin ages to >=70 and <70
+classify_ages = function(ages) {
+  classifications = ifelse(ages <= 70, "Under 70", "Over 70")
+  return(classifications)
+}
+```
+
+Bulk RNAseq Meganalysis based on age +/- 70
+```{r}
+acc_estimations_long$age_class <- sapply(acc_estimations_long$ageDeath, classify_ages) %>% factor(levels = c("Under 70", "Over 70"))
+acc_mega_lms_by_age_class = acc_estimations_long %>% 
+  group_by(age_class, cell_type) %>%
+  do(tidy(lm(scale(rel_prop) ~ scale(RIN) +
+             reportedGender + newStudy + primaryDiagnosis, data = .))) %>%
+  ungroup() %>% 
+  mutate(padj = p.adjust(`p.value`, method = 'fdr'),
+         term = recode(term,
+                       `(Intercept)` = "Intercept",
+                       `reportedGendermale` = "gender:Male",
+                       `primaryDiagnosisSchizophrenia` = "SCZ",
+                       `scale(ageDeath)` = "Age",
+                       `scale(PMI)` = "PMI", 
+                       `newStudyNIMH_HBCC` = "NIMH_HBCC",
+                       `newStudyPitt` = "Pitt",
+                       `newStudyMSSM` = "MSSM",
+                       `newStudyPenn` = "Penn",
+                       `scale(RIN)` = "RIN")) %>%
+  merge(unique(acc_estimations_long[c('cell_class', 'cell_type')]), by.x = "cell_type")
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+

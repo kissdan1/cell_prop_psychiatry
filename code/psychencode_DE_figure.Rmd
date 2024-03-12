@@ -26,9 +26,13 @@ cbPalette <- c("#56B4E9", "#009E73","#E69F00", "#0072B2", "#D55E00", "#CC79A7","
 Load Data // Define Variables
 ```{r}
 DE_results_ALL = readRDS("~/cell_prop_psychiatry/data/DE_results_ALL")
-pseudobulk = read.delim("/external/rprshnas01/netdata_kcni/stlab/SZBDMulticohort/pseudobulk_fine_grained.counts.tsv")
-pseudobulk_metadata = read.delim("/external/rprshnas01/netdata_kcni/stlab/SZBDMulticohort/pseudobulk_fine_grained.metadata.tsv")
-
+DE_results_McLean = readRDS("~/cell_prop_psychiatry/data/DE_results_McLean")
+DE_results_MtSinai = readRDS("~/cell_prop_psychiatry/data/DE_results_MtSinai")
+pseudobulk = read.csv("~/cell_prop_psychiatry/data/psychencode_label_transferred_pseudobulk_raw.csv")[,-1]
+pseudobulk_metadata = read.csv("~/cell_prop_psychiatry/data/psychencode_label_transferred_pseudobulk_metadata.csv")[,-1] %>%
+  group_by(ID) %>%
+  mutate(total_cells = sum(num_cells)) %>%
+  ungroup() 
 #Add log10 number of cells variable
 pseudobulk_metadata$log10_num_cells = log10(pseudobulk_metadata$num_cells)
 #Add age group variable
@@ -39,54 +43,61 @@ pseudobulk_metadata$age_group = pseudobulk_metadata$age_group %>% factor(levels 
 pseudobulk_combined = left_join(pseudobulk_metadata, pseudobulk)
 
 #Convert to log2(cmp + 1) / num_cells
-genes = pseudobulk_combined[, 31:ncol(pseudobulk_combined)] %>% mutate(
-  across(everything(), ~log2(.x + 1)))
+genes = pseudobulk_combined[, 29:ncol(pseudobulk_combined)] %>% cpm(log=TRUE) %>% as.data.frame()
 
-pseudobulk_transformed = cbind(pseudobulk_combined[,1:30], genes)
+pseudobulk_transformed = cbind(pseudobulk_combined[,1:28], genes)
 ```
+
+Important Variables to Define
+```{r}
+CELL_TYPES = c("SST", "PVALB", "VIP")
+NUM_CELLS = 1000
+AGE_THRESH = 70 
+DATASET = c("McLean") #Vector of dataset names (can be length = 1)
+```
+
 
 Create a list of relevant data for each cell type
 ```{r}
-CELL_TYPES = c("In-PV_Basket", "In-SST", "In-VIP")
-NUM_CELLS = 50
-AGE_THRESH = 70 
 no_batch_list = list()
+#Subset count matrix (if doing cohort stratified analysis)
+pseudobulk_subset = pseudobulk_transformed %>% filter(Cohort %in% DATASET)
 
 #Loop through ALL cell types and perform above analyses
 for(CELL_TYPE in CELL_TYPES) {
-  counts_under_70 = pseudobulk_transformed %>% filter(Celltype == CELL_TYPE, age_group == "Under_70")
-  counts_over_70 = pseudobulk_transformed %>% filter(Celltype == CELL_TYPE, age_group == "Over_70")
+  counts_under_70 = pseudobulk_subset %>% filter(Celltype == CELL_TYPE, age_group == "Under_70", total_cells >= NUM_CELLS)
+  counts_over_70 = pseudobulk_subset %>% filter(Celltype == CELL_TYPE, age_group == "Over_70", total_cells >= NUM_CELLS)
 
-  #Create batch and covariate labels for Under_70
-  disease = factor( counts_under_70 %>% pull(Phenotype), levels = c('CON', 'SZ'))
-  sex =  counts_under_70 %>% pull(Gender)
-  pmi = counts_under_70 %>%  pull(PMI)
-  age =  counts_under_70 %>% pull(Age)
-  cohort = counts_under_70 %>% pull(Cohort)
-  log_10_cells_per_donor =  counts_under_70 %>% pull(log10_num_cells)
+  # Create batch and covariate labels for Under_70
+  disease = factor(counts_under_70 %>% pull(Phenotype), levels = c('CON', 'SZ'))
+  sex = counts_under_70 %>% pull(Gender)
+  pmi = counts_under_70 %>% pull(PMI)
+  age = counts_under_70 %>% pull(Age)
+  cohort = if (length(unique(DATASET)) > 1) counts_under_70 %>% pull(Cohort) else NULL
+  log_10_cells_per_donor = counts_under_70 %>% pull(log10_num_cells)
   
-  #Use variables to regress out covariates using removeBatchEffect
+  # Use variables to regress out covariates using removeBatchEffect
   data = counts_under_70[, 31:ncol(counts_under_70)] %>% t()
   under_70_no_batch = removeBatchEffect(x = data,
-                                       batch = sex,
-                                       batch2 = cohort,
-                                       covariates = cbind(pmi, age, log_10_cells_per_donor),
-                                       design = model.matrix(~ disease)) %>% t()
+                                        batch = sex,
+                                        batch2 = if (!is.null(cohort)) cohort else NULL,
+                                        covariates = cbind(pmi, age, log_10_cells_per_donor),
+                                        design = model.matrix(~ disease)) %>% t()
   under_70_no_batch = cbind(counts_under_70[, 1:30], under_70_no_batch)
   
-  #Create batch and covariate labels for Over_70
+  # Create batch and covariate labels for Over_70
   disease = factor(counts_over_70 %>% pull(Phenotype), levels = c('CON', 'SZ'))
-  sex =  counts_over_70 %>% pull(Gender)
-  pmi = counts_over_70 %>%  pull(PMI)
-  age =  counts_over_70 %>% pull(Age)
-  cohort = counts_over_70 %>% pull(Cohort)
-  log_10_cells_per_donor =  counts_over_70 %>% pull(log10_num_cells)
+  sex = counts_over_70 %>% pull(Gender)
+  pmi = counts_over_70 %>% pull(PMI)
+  age = counts_over_70 %>% pull(Age)
+  cohort = if (length(unique(DATASET)) > 1) counts_over_70 %>% pull(Cohort) else NULL
+  log_10_cells_per_donor = counts_over_70 %>% pull(log10_num_cells)
   
-  #Use variables to regress out covariates using removeBatchEffect
+  # Use variables to regress out covariates using removeBatchEffect
   data = counts_over_70[, 31:ncol(counts_over_70)] %>% t()
   over_70_no_batch = removeBatchEffect(x = data,
                                        batch = sex,
-                                       batch2 = cohort,
+                                       batch2 = if (!is.null(cohort)) cohort else NULL,
                                        covariates = cbind(pmi, age, log_10_cells_per_donor),
                                        design = model.matrix(~ disease)) %>% t()
   over_70_no_batch = cbind(counts_over_70[, 1:30], over_70_no_batch)
@@ -95,39 +106,42 @@ for(CELL_TYPE in CELL_TYPES) {
   joined_data = rbind(under_70_no_batch, over_70_no_batch) 
   no_batch_list[[CELL_TYPE]] = joined_data
 }
+
 ```
 
 
 Plot mRNA expression for main interneuron subtypes and their corresponding marker genes
 ```{r, fig.height= 12, fig.width= 7}
 #Create separate plots for each cell type
-SST_mRNA = no_batch_list$`In-SST` %>%
+SST_max_y <- max(no_batch_list$SST$SST, na.rm = TRUE) + 1  # Find max y-value and add 1 for space
+SST_mRNA <- no_batch_list$SST %>%
   ggplot(aes(x = Phenotype, y = SST)) +
   geom_boxplot(outlier.shape = NA, show.legend = F) +
   facet_grid(~age_group, drop = T, scales = "free_y") +
   theme(text = element_text(size = 18)) +
-  coord_cartesian(ylim = c(-8, 6)) +
   ylab('log2(cpm + 1)') + 
-  geom_signif(comparisons = list(c("CON", "SZ")), map_signif_level = TRUE, y_position = 4)
+  geom_signif(comparisons = list(c("CON", "SZ")), map_signif_level = TRUE, y_position = SST_max_y - 1) +
+  coord_cartesian(ylim = c(NA, SST_max_y))  # Adjust the y-axis limit
 
-PVALB_mRNA = no_batch_list$`In-PV_Basket` %>% 
+PVALB_max_y <- max(no_batch_list$PVALB$PVALB, na.rm = TRUE) + 1
+PVALB_mRNA <- no_batch_list$PVALB %>% 
   ggplot(aes(x = Phenotype, y = PVALB)) +
   geom_boxplot(outlier.shape = NA, show.legend = F) +
   facet_grid(~age_group, drop = T, scales = "free_y") +
   theme(text = element_text(size = 18)) +
-  coord_cartesian(ylim = c(-8, 3)) +
   ylab('log2(cpm + 1)') + 
-  geom_signif(comparisons = list(c("CON", "SZ")), map_signif_level = TRUE, y_position = 2)
+  geom_signif(comparisons = list(c("CON", "SZ")), map_signif_level = TRUE, y_position = PVALB_max_y - 1) +
+  coord_cartesian(ylim = c(NA, PVALB_max_y))
 
-
-VIP_mRNA = no_batch_list$`In-VIP` %>%
+VIP_max_y <- max(no_batch_list$VIP$VIP, na.rm = TRUE) + 1
+VIP_mRNA <- no_batch_list$VIP %>%
   ggplot(aes(x = Phenotype, y = VIP)) +
   geom_boxplot(outlier.shape = NA, show.legend = F) +
   facet_grid(~age_group, drop = T, scales = "free_y") +
   theme(text = element_text(size = 18)) +
-  coord_cartesian(ylim = c(-3, 5)) +
   ylab('log2(cpm + 1)') + 
-  geom_signif(comparisons = list(c("CON", "SZ")), map_signif_level = TRUE, y_position = 4)
+  geom_signif(comparisons = list(c("CON", "SZ")), map_signif_level = TRUE, y_position = VIP_max_y - 1) +
+  coord_cartesian(ylim = c(NA, VIP_max_y))
 
 
 mRNA_figure = SST_mRNA / PVALB_mRNA / VIP_mRNA + 
@@ -135,14 +149,13 @@ mRNA_figure = SST_mRNA / PVALB_mRNA / VIP_mRNA +
   plot_layout(heights = c(1, 1, 1)) & 
   theme(plot.tag = element_text(size = 25))
 
-mRNA_figure
 ```
 
 
 Create volcano plots from DE results
 ```{r}
 #Create vectors of MGP marker genes for each cell type
-markers = read_rds("/external/rprshnas01/kcni/dkiss/cell_prop_psychiatry/data/marker_list.rds")
+markers = read.csv("~/cell_prop_psychiatry/data/MGP_markers.csv")
 SST_markers = markers %>% filter(subclass == "SST") %>% pull(gene)
 PVALB_markers = markers %>% filter(subclass == "PVALB") %>% pull(gene)
 VIP_markers = markers %>% filter(subclass == "VIP") %>% pull(gene)
@@ -187,25 +200,32 @@ MGPVolcano <- function(matrix, marker_genes) {
 
 Create volcano plots for each cell for above and below age 70
 ```{r, fig.height= 16, fig.width= 12}
+# Conditionally set DE_results basedon datasets  used
+if (length(DATASET) > 1) {
+  DE_results <- DE_results_ALL
+} else {
+  DE_results <- get(paste0("DE_results_", DATASET))
+}
+
 #Set figure font sizes
 common_theme = theme(
   axis.title = element_text(size = 16),
   axis.text = element_text(size = 16)
 )
-
-SST_volcano_under = MGPVolcano(DE_results_ALL$`In-SST`$DE_tables$DE_under, SST_markers) + ggtitle("Under 70") +
+#Make volcano plots
+SST_volcano_under = MGPVolcano(DE_results$SST$DE_tables$DE_under, SST_markers) + ggtitle("Under 70") +
                     theme(plot.title = element_text(hjust = 0.5, size = 18)) + common_theme
-SST_volcano_over = MGPVolcano(DE_results_ALL$`In-SST`$DE_tables$DE_over, SST_markers) + ggtitle("Over 70") +
-                    theme(plot.title = element_text(hjust = 0.5, size = 18)) + common_theme
-
-PVALB_volcano_under = MGPVolcano(DE_results_ALL$`In-PV_Basket`$DE_tables$DE_under, PVALB_markers) + ggtitle("Under 70") +
-                    theme(plot.title = element_text(hjust = 0.5, size = 18)) + common_theme
-PVALB_volcano_over = MGPVolcano(DE_results_ALL$`In-PV_Basket`$DE_tables$DE_over, PVALB_markers) + ggtitle("Over 70") +
+SST_volcano_over = MGPVolcano(DE_results$SST$DE_tables$DE_over, SST_markers) + ggtitle("Over 70") +
                     theme(plot.title = element_text(hjust = 0.5, size = 18)) + common_theme
 
-VIP_volcano_under = MGPVolcano(DE_results_ALL$`In-VIP`$DE_tables$DE_under, VIP_markers) + ggtitle("Under 70") +
+PVALB_volcano_under = MGPVolcano(DE_results$PVALB$DE_tables$DE_under, PVALB_markers) + ggtitle("Under 70") +
                     theme(plot.title = element_text(hjust = 0.5, size = 18)) + common_theme
-VIP_volcano_over = MGPVolcano(DE_results_ALL$`In-VIP`$DE_tables$DE_over, VIP_markers) + ggtitle("Over 70") +
+PVALB_volcano_over = MGPVolcano(DE_results$PVALB$DE_tables$DE_over, PVALB_markers) + ggtitle("Over 70") +
+                    theme(plot.title = element_text(hjust = 0.5, size = 18)) + common_theme
+
+VIP_volcano_under = MGPVolcano(DE_results$VIP$DE_tables$DE_under, VIP_markers) + ggtitle("Under 70") +
+                    theme(plot.title = element_text(hjust = 0.5, size = 18)) + common_theme
+VIP_volcano_over = MGPVolcano(DE_results$VIP$DE_tables$DE_over, VIP_markers) + ggtitle("Over 70") +
                     theme(plot.title = element_text(hjust = 0.5, size = 18)) + common_theme
 
 
@@ -213,6 +233,10 @@ VIP_volcano_over = MGPVolcano(DE_results_ALL$`In-VIP`$DE_tables$DE_over, VIP_mar
 
 Combine into final DE_figure
 ```{r, fig.height= 18, fig.width= 16}
+#Define plot title
+dataset_title = if(length(DATASET) > 1) paste(DATASET, collapse = " & ") else DATASET
+
+#Combine plots
 SST_combined = SST_mRNA + SST_volcano_under + SST_volcano_over + plot_layout(widths = c(2,3,3)) + 
                plot_annotation(title = "SST", theme = theme(plot.title = element_text(hjust = 0.5, size = 22, face = "bold"), plot.margin = margin(t = 25, unit = "pt")))
 
@@ -225,13 +249,13 @@ VIP_combined = VIP_mRNA + VIP_volcano_under + VIP_volcano_over + plot_layout(wid
 DE_figure = ggarrange(SST_combined, PVALB_combined, VIP_combined,
                       labels = c("A", "B", "C"),
                       ncol = 1, nrow = 3,
-                      font.label = list(size = 32, face = "bold"))
-DE_figure
+                      font.label = list(size = 32, face = "bold")) %>% 
+                      annotate_figure(top = text_grob(paste("DE Analysis -", dataset_title), size = 28, face = "bold"))
+
 
 #Save to plots folder
-output_filename <- "~/cell_prop_psychiatry/plots/DE_figure.jpg"
-
-# Use ggsave to save the plot as a JPG image
+dataset_suffix = if(length(DATASET) > 1) "ALL" else DATASET
+output_filename <- paste0("~/cell_prop_psychiatry/plots/DE_figure_", dataset_suffix ,".jpg")
 ggsave(output_filename, DE_figure, width = 16, height = 18, dpi = 300)
 ```
 

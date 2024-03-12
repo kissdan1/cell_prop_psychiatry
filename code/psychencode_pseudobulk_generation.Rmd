@@ -26,37 +26,34 @@ query_metadata = query_metadata[,-1]%>%
   mutate(n_cells = n()) %>%
   as.data.frame()
 rownames(query_metadata) = query_metadata$cell_id
+
+query_metadata = query_metadata %>%
+  mutate(unique_donor_ID = paste(ID, Internal_ID, sep = "_")) %>%
+  select(unique_donor_ID, everything())
 ```
 
 ```{r}
-pseudobulk_metadata = query_metadata %>%
-  # collapse by sample to get metadata that matches the dimensions of the pseudobulk matrix 
-  dplyr::select(Phenotype, subclass_label, pseudobulk_group, n_cells) %>%
-  distinct(pseudobulk_group, .keep_all = TRUE) %>%
-  # drop subclasses if one of the samples (conditions) has <20 cells 
-  group_by(subclass_label) %>%
-  filter(all(n_cells >= 20)) %>%
-  as.data.frame()
-rownames(pseudobulk_metadata) = NULL
+pseudobulk_metadata_new = query_metadata %>%
+  group_by(unique_donor_ID, ID, predicted.id, Cohort, Internal_ID, CMC_ID, Phenotype, Batch, HTO, 
+Gender, Age, PMI, EUR_Ancestry, EAS_Ancestry, AMR_Ancestry, SAS_Ancestry, AFR_Ancestry, 
+Benzodiazepines, Anticonvulsants, AntipsychTyp, AntipsychAtyp, Antidepress, Lithium, PRS) %>%
+  summarise(num_cells = n(), .groups = 'drop') %>% rename(Celltype = predicted.id)
 
-# filter out droppped subclasses from cell-level metadata
-query_metadata = query_metadata %>% 
-  filter(pseudobulk_group %in% pseudobulk_metadata$pseudobulk_group,
-         subclass_label %in% pseudobulk_metadata$subclass_label)
+pseudobulk_metadata_new$Celltype =  pseudobulk_metadata_new$Celltype %>% make.names()
+
+
+write.csv(pseudobulk_metadata_new, "~/cell_prop_psychiatry/data/psychencode_label_transferred_pseudobulk_metadata.csv")
+
+
 ```
 
-```{r}
-# match counts to cell-level metadata
-query_matrix = query_matrix[,match(query_metadata$cell_id, colnames(query_matrix))]
-# check
-all(rownames(query_metadata) == colnames(query_matrix))
 
-# get pseudobulks
-mm = model.matrix(~ 0 + pseudobulk_group, query_metadata)
-pseudobulk_matrix = as.matrix(query_matrix %*% mm)
-# clean column names 
-colnames(pseudobulk_matrix) = gsub("pseudobulk_group", "", colnames(pseudobulk_matrix))
-```
+
+
+
+
+
+
 
 
 
