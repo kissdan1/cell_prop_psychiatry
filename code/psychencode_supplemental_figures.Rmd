@@ -25,29 +25,76 @@ library(ggbeeswarm)
 library(lemon)
 theme_set(theme_classic2())
 #Colour palette
-cbPalette = c("#56B4E9", "#009E73","#E69F00", "#0072B2", "#D55E00", "#CC79A7","#000000","#F0E442")
+cbPalette = c("#E69F00", "#D55E00", "#CC79A7")
 ```
 
-Loading Data
+Loading Bulk Data
 ```{r}
+
+#Add PMI info from CMC metadata
+psychencode_metadata = read.csv(("/external/rprshnas01/external_data/psychencode/PsychENCODE/Metadata/CapstoneCollection_Metadata_Clinical.csv"))
+CMC_metadata = read.csv("/external/rprshnas01/external_data/psychencode/PsychENCODE/CMC/Metadata/SYNAPSE_TABLE_QUERY_123020650.csv") %>% filter(dataType == "geneExpression", fileFormat == "tsv")  %>% left_join(psychencode_metadata)
+names(CMC_metadata)[names(CMC_metadata) == "Individual_ID"] = "individualID"
+
 #Cell type proportions for each data set merged with metadata - ready for modelling 
-acc_estimations = read_csv("/external/rprshnas01/kcni/dkiss/cell_prop_psychiatry/data/cmc_acc_mgp_estimations.csv") %>% filter(primaryDiagnosis %in% c("control", "Schizophrenia"))
+acc_estimations = read_csv("/external/rprshnas01/kcni/dkiss/cell_prop_psychiatry/data/cmc_acc_mgp_estimations.csv") %>% filter(primaryDiagnosis %in% c("control", "Schizophrenia")) %>% left_join(CMC_metadata[, c("individualID", "PMI")], by = "individualID")
+acc_estimations$newStudy = acc_estimations$newStudy %>% factor(levels = c("Pitt_ACC", "MSSM_ACC", "Penn_ACC"))
 acc_estimations_long = acc_estimations %>% pivot_longer(cols = Astrocyte:VLMC, names_to = 'cell_type', values_to = 'rel_prop') %>%
   mutate(cell_class = case_when(
     cell_type %in% c("LAMP5", "PAX6", "PVALB", "SST", "VIP") ~ "Inhibitory",
     cell_type %in% c("IT", "L4.IT", "L5.ET", "L5.6.IT.Car3", "L5.6.NP", "L6.CT", "L6b") ~ "Excitatory",
     TRUE ~ "Non-Neuronal"
   ))
-#Load Sibille Lab microscopy
-microCTPs = read_csv('/external/rprshnas01/netdata_kcni/stlab/cross_cohort_MGPs/sibille_lab_cell_fractions.csv') 
 
 ```
+
+Cohort demographic summary
+```{r}
+acc_summary_df = acc_estimations %>%
+    distinct(individualID, .keep_all = TRUE) %>% # Ensure rows are unique based on individualID
+    group_by(newStudy) %>%
+    summarise(
+        CohortName = first(newStudy),
+        PercentMale = mean(reportedGender == "male", na.rm = TRUE) * 100,
+        AvgAge = mean(ageDeath, na.rm = TRUE),
+        AgeSD = sd(ageDeath, na.rm = TRUE),
+        NumCases = sum(primaryDiagnosis == "Schizophrenia", na.rm = TRUE),
+        NumControls = sum(primaryDiagnosis == "control", na.rm = TRUE)
+    )
+```
+
+Loading LCM proportions
+```{r}
+#Load Sibille Lab microscopy
+sibille_lab_cell_props = sibille_lab_cell_fractions = read_csv('/external/rprshnas01/netdata_kcni/stlab/cross_cohort_MGPs/sibille_lab_cell_fractions.csv') %>% filter(Subject.Group %in% c("Control", "SCHIZ")) %>% distinct()
+
+# this is the tetrad metadata
+tetrad_path = '/external/rprshnas01/netdata_kcni/stlab/Collaborators/Sibille/RNAseq_processed/'
+tetrad_meta = read_csv(paste0(tetrad_path, "pTable with correct med info.csv"))
+tetrad_meta$sample_names = str_sub(tetrad_meta$X, end=-5) %>% make.names()
+tetrad_meta$sample_names =  gsub("_", ".", tetrad_meta$sample_names)
+tetrad_meta = tetrad_meta %>% mutate(Subject = HU., 
+                       Reported.Gender = case_when(Sex == "M" ~"Male",
+                                                   Sex == "F" ~ "Female"),
+                       Age_norm = Age, 
+                       PMI..in.hours. = PMI) %>% filter(Cell.Type == "SST")
+
+microCTPs = left_join(sibille_lab_cell_props, tetrad_meta) %>% filter(Subject != 1367)
+microCTPs_long =  microCTPs %>% pivot_longer(cols = c(PVALB, PYR_23, PYR_56, SST, VIP ), names_to = 'cell_type', values_to = 'rel_prop') 
+
+```
+
+Load LCM DE table
+```{r}
+scz_lcm_seq_de = readxl::read_excel("~/cell_prop_psychiatry/data/psychencode_lcm_DE_scz.xlsx")
+```
+
 
 Model rCTPs based on diagnosis and covariates separately in each cohort
 ```{r}
 acc_combined_lms = acc_estimations_long %>%
   group_by(newStudy, cell_type) %>%
-  do(tidy(lm(scale(rel_prop) ~ scale(RIN) + scale(ageDeath) +
+  do(tidy(lm(scale(rel_prop) ~ scale(RIN) + scale(ageDeath) + scale(PMI) +
                reportedGender + primaryDiagnosis, data = .))) %>%
   ungroup() %>%
   mutate(padj = p.adjust(p.value, method = 'fdr'),
@@ -59,15 +106,16 @@ acc_combined_lms = acc_estimations_long %>%
                        `scale(PMI)` = "PMI",
                        `scale(RIN)` = "RIN")) %>%
   merge(unique(acc_estimations_long[c('dataset', 'newStudy')]), by.x = "newStudy") %>%
-  merge(unique(acc_estimations_long[c('cell_class', 'cell_type')]), by.x = "cell_type") %>%
-  mutate(newStudy = factor(newStudy, levels = c("Pitt", "MSSM", "Penn")))
+  merge(unique(acc_estimations_long[c('cell_class', 'cell_type')]), by.x = "cell_type") 
+
+acc_combined_lms$newStudy = acc_combined_lms$newStudy %>% factor(levels = c("Pitt_ACC", "MSSM_ACC", "Penn_ACC"))
 ```
 
 Interaction mega-analysis w/ all data 
 ```{r}
 acc_mega_lms = acc_estimations_long %>% 
   group_by(cell_type) %>%
-  do(tidy(lm(scale(rel_prop) ~ scale(RIN) + scale(ageDeath) +
+  do(tidy(lm(scale(rel_prop) ~ scale(RIN) + scale(ageDeath) + scale(PMI) +
              reportedGender + primaryDiagnosis + newStudy + scale(ageDeath)*primaryDiagnosis, data = .))) %>%
   ungroup() %>% 
   mutate(padj = p.adjust(`p.value`, method = 'fdr'),
@@ -81,11 +129,11 @@ acc_mega_lms = acc_estimations_long %>%
                        `scale(PMI)` = "PMI", 
                        `newStudyNIMH_HBCC` = "NIMH_HBCC",
                        `newStudyLIBD_szControl` = "LIBD_szControl",
-                       `newStudyPitt` = "Pitt",
-                       `newStudyMSSM` = "MSSM",
-                       `newStudyPenn` = "Penn",
+                       `newStudyPitt` = "Pitt_ACC",
+                       `newStudyMSSM` = "MSSM_ACC",
+                       `newStudyPenn` = "Penn_ACC",
                        `scale(RIN)` = "RIN")) %>%
-  merge(unique(mgp_estimations_long[c('cell_class', 'cell_type')]), by.x = "cell_type") 
+  merge(unique(acc_estimations_long[c('cell_class', 'cell_type')]), by.x = "cell_type") 
 ```
 
 Functions to  generate age range bins 
@@ -105,14 +153,54 @@ classify_ages = function(ages) {
   classifications = ifelse(ages <= 70, "Under 70", "Over 70")
   return(classifications)
 }
+
+# Create function to map age to age range based on 20% quantiles
+age_to_range_quantile <- function(age) {
+  quantiles = quantile(age, probs = seq(0.5, 1, 0.5))
+  range_vec = c()
+  for (i in 1:length(quantiles)) {
+    if (i == 1) {
+      range_vec[age <= quantiles[i]] <- paste0(0, "-", quantiles[i])
+    } else {
+      range_vec[age > quantiles[i-1] & age <= quantiles[i]] <- paste0(quantiles[i-1], "-", quantiles[i])
+    }
+  }
+  range_vec
+}
 ```
+
+Create age groups from age 20-90 in increments of 10 years. Plot meganalysis beta coefs against age group.
+```{r}
+acc_estimations_long$age_range = sapply(acc_estimations_long$ageDeath, age_to_range)
+
+acc_lms_by_age = acc_estimations_long %>% filter(ageDeath >= 30) %>%
+  group_by(age_range, cell_type) %>%
+  do(tidy(lm(scale(rel_prop) ~ scale(RIN) + scale(PMI) +
+             reportedGender + primaryDiagnosis + newStudy, data = .))) %>%
+  ungroup() %>% 
+  mutate(padj = p.adjust(`p.value`, method = 'fdr'),
+         term = recode(term,
+                       `(Intercept)` = "Intercept",
+                       `reportedGendermale` = "gender:Male",
+                       `primaryDiagnosisSchizophrenia` = "SCZ",
+                       `scale(ageDeath)` = "Age",
+                       `scale(PMI)` = "PMI", 
+                       `newStudyNIMH_HBCC` = "NIMH_HBCC",
+                       `newStudyPitt` = "Pitt_ACC",
+                       `newStudyMSSM` = "MSSM_ACC",
+                       `newStudyPenn` = "Penn_ACC",
+                       `scale(RIN)` = "RIN")) %>%
+  merge(unique(acc_estimations_long[c('cell_class', 'cell_type')]), by.x = "cell_type") 
+```
+
+
 
 Bulk RNAseq Meganalysis based on age +/- 70
 ```{r}
 acc_estimations_long$age_class <- sapply(acc_estimations_long$ageDeath, classify_ages) %>% factor(levels = c("Under 70", "Over 70"))
 acc_mega_lms_by_age_class = acc_estimations_long %>% 
   group_by(age_class, cell_type) %>%
-  do(tidy(lm(scale(rel_prop) ~ scale(RIN) +
+  do(tidy(lm(scale(rel_prop) ~ scale(RIN) + scale(PMI) +
              reportedGender + newStudy + primaryDiagnosis, data = .))) %>%
   ungroup() %>% 
   mutate(padj = p.adjust(`p.value`, method = 'fdr'),
@@ -132,16 +220,404 @@ acc_mega_lms_by_age_class = acc_estimations_long %>%
 
 ```
 
+Model Microscopy CTPs
+```{r}
+
+micro_mega_lms = microCTPs_long %>% 
+  group_by(cell_type) %>%
+  do(tidy(lm(scale(rel_prop) ~ scale(PMI) + Subject.Group + Sex + scale(Age),  data = .))) %>%
+  ungroup() %>% 
+  mutate(padj = p.adjust(`p.value`, method = 'fdr')) %>%
+   mutate(term = recode(term,
+                       `(Intercept)` = "Intercept",
+                       `scale(PMI)` = "PMI", 
+                       `Subject.GroupControl` = "Control",
+                       `Subject.GroupSCHIZ`= "SCZ",
+                       `SexM` = "Sex"))
+
+```
 
 
 
+------------////FIGURES////------------
+
+Figure S1: Illustrating the association between cell prop and diagnosis and cohort specific differences
+```{r, fig.height=8, fig.width=8 }
+significant_combined = subset(acc_combined_lms, padj < 0.1 & cell_type %in% c("SST", "PVALB", "VIP") & term == "SCZ")
+significant_combined$asterisks <- ifelse(significant_combined$padj <= 0.01, "***",
+                                         ifelse(significant_combined$padj <= 0.05, "**", "*"))
+significant_combined$vjust <- ifelse(significant_combined$estimate >= 0, -3, 4)
+
+figure_S1b = acc_combined_lms %>%
+  filter(term == 'SCZ', cell_type %in% c("SST", "PVALB", "VIP")) %>% 
+  mutate(cell_type = fct_reorder(cell_type, estimate)) %>% 
+  ggplot(aes(x = newStudy, y = estimate, fill = newStudy)) + 
+  geom_hline(yintercept = 0) + 
+  geom_bar(stat = "identity", position = "dodge") + 
+  geom_errorbar(aes(ymin = estimate - std.error, ymax = estimate + std.error)) + 
+  ylab('Beta Coefficient') + 
+  xlab('') +
+  scale_fill_manual(values = cbPalette) +
+  geom_text(data = significant_combined,
+            aes(newStudy, estimate, label = asterisks), 
+            vjust = significant_combined$vjust) +
+  theme(
+    axis.text.x = element_blank(),
+    axis.text.y = element_text(size = 15),
+    axis.title.x = element_text(vjust = 6, size = 15),
+    axis.title.y = element_text(size = 16),
+    strip.text.x = element_text(size = 14),
+    axis.line.x = element_blank(), 
+    axis.ticks.x = element_blank()) +
+  facet_grid(~cell_type, drop = T, scale = "free_x", space = "free") +
+  guides(fill = guide_none()) +
+  scale_y_continuous(limits = c(-1, 1))
+
+# Figure 1c: Raw MGPs vs. Diagnosis
+figure_S1c <- acc_estimations_long %>%
+  filter(cell_type %in% c("SST", "PVALB", "VIP")) %>%
+  ggplot(aes(x = primaryDiagnosis, y = rel_prop)) +
+  geom_boxplot(outlier.shape = NA, aes(fill = newStudy, alpha = 0.5), show.legend = F, notch = T) +
+  geom_beeswarm(size = 1, alpha = 0.3, aes(colour = newStudy), show.legend = F) +
+  ylab('Relative Cell Prop.') + 
+  xlab('Diagnosis') + 
+  scale_x_discrete(labels = c("C", "SCZ")) +
+  scale_colour_manual(values = cbPalette) +
+  scale_fill_manual(values = cbPalette) +
+  theme(
+    axis.text.x = element_text(size = 15),
+    axis.text.y = element_text(size = 15),
+    axis.title.x = element_text(vjust = -2, size = 15),
+    axis.title.y = element_text(size = 15),
+    strip.text.x = element_text(size = 14),
+    strip.text.y = element_text(size = 14)) +
+  guides(fill = FALSE) +
+  facet_grid(rows = vars(cell_type), cols = vars(newStudy), drop = T, scale = "free", switch = "y", space = "free") +
+  geom_signif(comparisons = list(c("control", "Schizophrenia")), map_signif_level = TRUE, , test = wilcox.test) +
+  scale_y_continuous(limits = c(-4, 4)) 
+
+#Figure 1d - Hisotgram of cohort ages
+figure_S1d = acc_estimations %>%
+    ggplot(aes(x = ageDeath)) +
+    geom_histogram(aes(fill = newStudy)) +
+    facet_wrap(~ newStudy, nrow = 6, scales = "free_y") +
+    labs(x = "ageDeath", y = "Frequency") +
+    scale_fill_manual(values = c("#E69F00", "#D55E00", "#CC79A7")) + 
+  scale_y_continuous(n.breaks = 4) +
+  guides(fill = guide_none()) + 
+  theme(panel.grid = element_blank(),
+        strip.background = element_blank(),
+        strip.text = element_text(size = rel(0.9), face = "plain"),
+    axis.text.x = element_text(size = 13),
+    axis.text.y = element_text(size = 13),
+    axis.title.x = element_text( size = 15),
+    axis.title.y = element_text(size = 16),
+    strip.text.x = element_text(size = 14))
+
+# Combine Figure 1
+figure_S1_top = (figure_S1b | figure_S1d) + plot_layout(widths = c(2,1))
+figure_S1_bottom = figure_S1c
+  
+figure_S1 = figure_S1_top / figure_S1_bottom + plot_annotation(tag_levels = 'A') + plot_layout(heights = c(2, 3)) & theme(plot.tag = element_text(size = 25))
+figure_S1
+
+#Save to plots folder
+output_filename <- "~/cell_prop_psychiatry/plots/figure_S1.jpg"
+
+# Use ggsave to save the plot as a JPG image
+ggsave(output_filename, figure_S1, width = 10, height = 10, dpi = 200)
+
+```
 
 
 
+Figure 2: Introducing and presenting an interaction between age and diagnosis w/rt cell proportion.
+```{r, fig.height=10, fig.width=10}
+# Plot interaction beta values from meganalysis
+significant_mega = subset(acc_mega_lms, padj <= 0.1 & term == "Age x Diagnosis")
+significant_mega$asterisks = ifelse(significant_mega$padj <= 0.01, "***",
+                                   ifelse(significant_mega$padj <= 0.05, "**", "*"))
+significant_mega$vjust = ifelse(significant_mega$estimate >= 0, -2, 3)
+
+# Figure 2a: Results from interaction meganalysis stratified by cell class - plot interaction beta coeff
+figure_S2a = acc_mega_lms %>% 
+  filter(term %in% 'Age x Diagnosis') %>% 
+  ggplot(aes(x = cell_type, y = estimate)) + 
+  geom_hline(yintercept = 0) + 
+  geom_bar(stat = "identity", position = "dodge") + 
+  facet_grid(~cell_class, drop = T, scale = "free_x", space = "free") +
+  geom_errorbar(aes(ymin = estimate - std.error, ymax = estimate + std.error)) + 
+  ylab('Interaction Coefficient') + 
+  xlab('Cell Type') + 
+  geom_text(data = significant_mega,
+            aes(cell_type, estimate, label = asterisks), 
+            vjust = significant_mega$vjust) +
+  theme(
+    axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1, size = 12), 
+    axis.text.y = element_text(size = 15),
+    axis.title.x = element_text(vjust = 8, size = 15),
+    axis.title.y = element_text(size = 15),
+    strip.text.x = element_text(size = 14)) +
+  guides(fill = FALSE) +
+  scale_y_continuous(limits = c(-0.5, 0.7))
+
+# Figure 2b: Plot beta values from meganalysis in 10-year age bins for SST, PVALB, VIP
+significant_mega_age = subset(acc_lms_by_age, padj <= 0.1 & term == "SCZ" & cell_type %in% c("SST", "PVALB", "VIP"))
+significant_mega_age$asterisks = ifelse(significant_mega_age$padj <= 0.01, "***",
+                                         ifelse(significant_mega_age$padj <= 0.05, "**", "*"))
+significant_mega_age$vjust = ifelse(significant_mega_age$estimate >= 0, -3, 3)
+
+figure_S2b = acc_lms_by_age %>% 
+  filter(term %in% 'SCZ' & cell_type %in% c("SST", "PVALB", "VIP")) %>% 
+  mutate(cell_type = fct_reorder(cell_type, estimate)) %>% 
+  ggplot(aes(x = age_range, y = estimate)) + 
+  geom_hline(yintercept = 0) + 
+  geom_bar(stat = "identity", position = "dodge") + 
+  geom_errorbar(aes(ymin = estimate - std.error, ymax = estimate + std.error)) + 
+  ylab('Beta Coefficient') + 
+  xlab('\n \n Age Range') + 
+  geom_text(data = significant_mega_age,
+            aes(age_range, estimate, label = asterisks), 
+            vjust = significant_mega_age$vjust) +
+  theme(
+    axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1, size = 13), 
+    axis.text.y = element_text(size = 15),
+    axis.title.x = element_text(vjust = 8, size = 15),
+    axis.title.y = element_text(size = 15),
+    strip.text.x = element_text(size = 14)) +
+  facet_wrap(~cell_type, drop = T, scale = "free_x") +
+  guides(fill = FALSE) +
+  scale_y_continuous(limits = c(-1.4, 1.4))
+
+# Add residuals to all_estimations_long
+res_model = lm(scale(rel_prop) ~ scale(RIN) + scale(PMI) + reportedGender , data = acc_estimations_long)
+acc_estimations_long = acc_estimations_long %>% add_residuals(var = "resid", model = res_model)
+
+# Figure 2c: Visualizing interaction between age and diagnosis by plotting rel_prop vs. age in each diagnosis 
+figure_S2c = acc_estimations_long %>%
+  filter(cell_type %in% c("SST", "PVALB", "VIP")) %>%
+  ggplot(aes(x = ageDeath, y = rel_prop, color = primaryDiagnosis)) +
+  geom_point(alpha = 0.5, size = 0.5) + 
+  geom_smooth(se = F, method = 'lm', fullrange = T) +
+  ylab('Relative Cell Prop.') + 
+  xlab('Age') + 
+  theme(
+    axis.text.x = element_text(size = 15),
+    axis.text.y = element_text(size = 15),
+    axis.title.x = element_text(vjust = -1, size = 15),
+    axis.title.y = element_text(size = 15),
+    legend.position = c(0.9, 0.8),
+    legend.title = element_blank(),
+    legend.text = element_text(size = 12),  
+    strip.text.x = element_text(size = 14)) +
+  facet_grid(~cell_type, drop = T, scale = "free_x", space = "free") +
+  guides(fill = guide_legend(nrow = 1)) +
+  scale_y_continuous(limits = c(-2, 2)) + 
+  scale_color_manual(values = c("dodgerblue2", "firebrick2"), labels=c('CON', 'SCZ'))
+
+#Figure 2d: Mega-analysis results when binned as +/- 70 years
+significant_mega_age_class = subset(acc_mega_lms_by_age_class, padj <= 0.1 & term == "SCZ" & cell_type %in% c("SST", "PVALB", "VIP"))
+significant_mega_age_class$asterisks = ifelse(significant_mega_age_class$padj <= 0.01, "***", ifelse(significant_mega_age_class$padj <= 0.05, "**", "*"))
+significant_mega_age_class$vjust = ifelse(significant_mega_age_class$estimate >= 0, -2, 3)
+
+figure_S2d = acc_mega_lms_by_age_class %>% 
+  filter(term %in% 'SCZ' & cell_type %in% c("SST", "PVALB", "VIP")) %>% 
+  mutate(cell_type = fct_reorder(cell_type, estimate)) %>% 
+  ggplot(aes(x = age_class, y = estimate)) + 
+  geom_hline(yintercept = 0) + 
+  geom_bar(stat = "identity", position = "dodge") + 
+  geom_errorbar(aes(ymin = estimate - std.error, ymax = estimate + std.error)) + 
+  ylab('Beta Coefficient') + 
+  xlab('\n \n Age Range') + 
+  geom_text(data = significant_mega_age_class,
+            aes(age_class, estimate, label = asterisks), 
+            vjust = significant_mega_age_class$vjust) +
+  theme(
+    axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1, size = 13), 
+    axis.text.y = element_text(size = 15),
+    axis.title.x = element_text(vjust = 8, size = 15),
+    axis.title.y = element_text(size = 15),
+    strip.text.x = element_text(size = 14)) +
+  facet_wrap(~cell_type, drop = T, scale = "free_x") +
+  guides(fill = FALSE) +
+  scale_y_continuous(limits = c(-1, 1))
+
+figure_S2_top = (figure_S2b +figure_S2d) + plot_layout(widths = c(1.6,1))
+figure_S2 = figure_S2_top / figure_S2c / figure_S2a
+figure_S2 = figure_S2 + plot_annotation(tag_levels = 'A') + plot_layout(heights = c(1, 1, 1)) & theme(plot.tag = element_text(size = 25))
+figure_S2
+
+#Save to plots folder
+output_filename <- "~/cell_prop_psychiatry/plots/figure_S2.jpg"
+
+# Use ggsave to save the plot as a JPG image
+ggsave(output_filename, figure_S2, width = 11, height = 11, dpi = 200)
+
+```
+
+Figure S3: Validating trends and interactions in ssRNAseq 
+```{r, fig.height= 5, fig.width=9}
+# Figure 3a: Relative cell proportions from snCTPs
+figure_S3a <- microCTPs_long %>% 
+  filter(Subject.Group %in% c('SCHIZ', "Control"), cell_type %in% c("SST", "PVALB", "VIP")) %>%
+  ggplot(aes(x = Age_norm, y = rel_prop, color = Subject.Group)) +
+  geom_point(alpha = 0.8, size = 1.3) + 
+  geom_smooth(se = F, method = 'lm') +
+  scale_colour_hue(labels = c("Control", "SCZ")) +
+  ylab('Relative Cell Prop.') + 
+  xlab('Age') + 
+  theme(
+    axis.text.x = element_text(size = 13),
+    axis.text.y = element_text(size = 13),
+    axis.title.x = element_text(vjust = -2, size = 16),
+    axis.title.y = element_text(size = 16),
+    legend.position = "bottom",
+    legend.title = element_blank(),
+    legend.text = element_text(size = 12), 
+    strip.text.x = element_text(size = 15),
+    strip.text.y = element_text(size = 15)
+  ) +
+  scale_color_manual(values = c("dodgerblue2", "firebrick2"), labels=c('CON', 'SCZ')) +
+  facet_wrap(~cell_type, drop = T, scale = "free")
+
+# Figure 3b: microCTP Beta plot
+significant_micro_mega <- subset(micro_mega_lms, padj <= 0.1 & term == "SCZ" & cell_type %in% c("SST", "PVALB", "VIP"))
+significant_micro_mega$asterisks <- ifelse(significant_micro_mega$padj <= 0.01, "***",
+                                         ifelse(significant_micro_mega$padj <= 0.05, "**", "*"))
+significant_micro_mega$vjust <- ifelse(significant_micro_mega$estimate >= 0, -5, 5)
+
+figure_S3b <- micro_mega_lms %>% 
+  filter(term %in% 'SCZ' & cell_type %in% c("SST", "PVALB", "VIP")) %>% 
+  mutate(cell_type = fct_reorder(cell_type, estimate)) %>% 
+  ggplot(aes(x = cell_type, y = estimate)) + 
+  geom_hline(yintercept = 0) + 
+  geom_bar(stat = "identity", position = "dodge") + 
+  geom_errorbar(aes(ymin = estimate - std.error, ymax = estimate + std.error)) + 
+  ylab('Beta Coefficient') + 
+  xlab('Cell Type') + 
+  geom_text(data = significant_micro_mega,
+            aes(estimate, label = asterisks), 
+            vjust = significant_micro_mega$vjust) +
+  theme(
+    axis.text.x = element_text(size = 13),
+    axis.text.y = element_text(size = 13),
+    axis.title.x = element_text(size = 16),
+    axis.title.y = element_text(size = 16),
+    legend.position = "bottom",
+    legend.title = element_blank(),
+    legend.text = element_text(size = 12), 
+    strip.text.x = element_text(size = 15)
+  ) 
 
 
 
+# Figure 3: Combined figure
+figure_S3 = (figure_S3a + figure_S3b) +
+  theme(plot.margin = unit(c(5.5, 10, 5.5, 5.5), "pt"))
+figure_S3 = figure_S3 + plot_annotation(tag_levels = 'A') + plot_layout(widths = c(3, 1)) & theme(plot.tag = element_text(size = 25))
+figure_S3
+
+#Save to plots folder
+output_filename <- "~/cell_prop_psychiatry/plots/figure_S3.jpg"
+
+# Use ggsave to save the plot as a JPG image
+ggsave(output_filename, figure_S3, width = 9, height = 4, dpi = 200)
+
+```
+
+```{r}
+MGPVolcano <- function(matrix, marker_genes) {
+  significant_genes <- subset(matrix, abs(logFC) > 1 & P.Value < 0.1)
+  significant_marker_genes <- subset(matrix, gene_symbol %in% marker_genes & abs(logFC) > 1 & P.Value < 0.1)
+  
+  # Increase plot limits slightly to provide more space for labels
+  x_range <- range(matrix$logFC, na.rm = TRUE)
+  y_range <- range(-log10(matrix$P.Value), na.rm = TRUE)
+  
+  matrix %>%
+    ggplot(aes(x = logFC, y = -log10(P.Value))) + 
+    geom_vline(xintercept = -1, linetype = "dotted") +
+    geom_vline(xintercept = 1, linetype = "dotted") +
+    geom_hline(yintercept = -log10(0.1), linetype = "dotted") +
+    geom_point(
+      aes(label = gene_symbol), 
+      alpha = 0.3, # Set opacity 30%
+      color = "black", # Default color for non-significant points
+      size = 3 # Adjust size as needed
+    ) +
+    geom_point(
+      data = significant_marker_genes, 
+      color = 'blue', # Set specific color for significant marker genes
+      size = 3 # Keep size consistent
+    ) +
+    geom_point(
+      data = subset(matrix, gene_symbol %in% marker_genes & !(gene_symbol %in% significant_marker_genes$gene_symbol)),
+      color = 'red', # Set specific color for other specified marker genes
+      size = 3 # Keep size consistent
+    ) +
+    geom_label_repel(
+      data = significant_marker_genes, 
+      aes(label = gene_symbol), 
+      box.padding = 0.35, 
+      point.padding = 0.5,
+      segment.color = 'grey50',
+      fill = "white", 
+      color = "blue",
+      max.overlaps = Inf,
+      nudge_x = (x_range[2] - x_range[1]) * 0.2, # Nudge labels horizontally
+      nudge_y = (y_range[2] - y_range[1]) * 0.2 # Nudge labels vertically
+    ) +
+    geom_label_repel(
+      data = subset(matrix, gene_symbol %in% marker_genes & !(gene_symbol %in% significant_marker_genes$gene_symbol)), 
+      aes(label = gene_symbol), 
+      box.padding = 0.35, 
+      point.padding = 0.5,
+      segment.color = 'grey50',
+      fill = "white", 
+      color = "red",
+ max.overlaps = Inf,
+      nudge_x = (x_range[2] - x_range[1]) * 0.1, # Nudge labels horizontally
+      nudge_y = (y_range[2] - y_range[1]) * 0.1 # Nudge labels vertically
+    ) +
+    theme_cowplot() +
+    theme(legend.position = "none") +
+    expand_limits(x = x_range + c(-1, 2) * 0.5, y = y_range + c(-1, 1) * 0.5) # Expand plot limits
+}
 
 
+```
+Figure S4: Volcano plots for LCM-seq 
+```{r, fig.width= 12, fig.height=4}
+markers = read.csv("~/cell_prop_psychiatry/data/MGP_markers.csv")
+SST_markers = markers %>% filter(subclass == "SST") %>% pull(gene)
+PVALB_markers = markers %>% filter(subclass == "PVALB") %>% pull(gene)
+VIP_markers = markers %>% filter(subclass == "VIP") %>% pull(gene)
 
+scz_lcm_seq_de = scz_lcm_seq_de %>% filter(-log10(P.Value) < 5)
+
+
+#Set figure font sizes
+common_theme = theme(
+  axis.title = element_text(size = 16),
+  axis.text = element_text(size = 16)
+)
+
+SST_volcano = scz_lcm_seq_de %>% filter(CT == "SST") %>% MGPVolcano(SST_markers) + ggtitle("SST") +
+                    theme(plot.title = element_text(hjust = 0.5, size = 18)) + common_theme
+PVALB_volcano = scz_lcm_seq_de %>% filter(CT == "PVALB") %>% MGPVolcano(PVALB_markers) + ggtitle("PVALB") +
+                    theme(plot.title = element_text(hjust = 0.5, size = 18)) + common_theme
+VIP_volcano = scz_lcm_seq_de %>% filter(CT == "VIP") %>% MGPVolcano(VIP_markers) + ggtitle("VIP") +
+                    theme(plot.title = element_text(hjust = 0.5, size = 18)) + common_theme
+
+figure_S4 = ggarrange(SST_volcano, PVALB_volcano, VIP_volcano,
+                      labels = c("C", "D", "E"),
+                      ncol = 3, nrow = 1,
+                      font.label = list(size = 32, face = "bold"))
+
+#Save to plots folder
+output_filename <- "~/cell_prop_psychiatry/plots/figure_S4.jpg"
+
+# Use ggsave to save the plot as a JPG image
+ggsave(output_filename, figure_S4, width = 12, height = 4, dpi = 200)
+```
 

@@ -53,7 +53,7 @@ Important Variables to Define
 CELL_TYPES = c("SST", "PVALB", "VIP")
 NUM_CELLS = 1000
 AGE_THRESH = 70 
-DATASET = c("McLean") #Vector of dataset names (can be length = 1)
+DATASET = c("MtSinai") #Vector of dataset names (can be length = 1)
 ```
 
 
@@ -169,33 +169,61 @@ Function to create a volcano plot and highlight genes in a gene list:
 MGPVolcano <- function(matrix, marker_genes) {
   significant_genes <- subset(matrix, abs(logFC) > 1 & P.Value < 0.1)
   significant_marker_genes <- subset(matrix, genes %in% marker_genes & abs(logFC) > 1 & P.Value < 0.1)
+  
+  # Increase plot limits slightly to provide more space for labels
+  x_range <- range(matrix$logFC, na.rm = TRUE)
+  y_range <- range(-log10(matrix$P.Value), na.rm = TRUE)
+  
   matrix %>%
-    ggplot(aes(x = logFC, y = -log10(P.Value), label = genes)) + 
-    geom_point(alpha = 0.3) +
+    ggplot(aes(x = logFC, y = -log10(P.Value))) + 
     geom_vline(xintercept = -1, linetype = "dotted") +
     geom_vline(xintercept = 1, linetype = "dotted") +
     geom_hline(yintercept = -log10(0.1), linetype = "dotted") +
-    geom_label_repel(data = significant_marker_genes, 
-                     aes(label = genes), 
-                     box.padding = 0.35, 
-                     point.padding = 0.5,
-                     segment.color = 'grey50',
-                     fill = "white", 
-                     color = "blue") +
-    geom_point(data = significant_marker_genes, 
-               aes(color = 'blue')) +
-    geom_label_repel(data = subset(matrix, genes %in% marker_genes & !(genes %in% significant_marker_genes$genes)), 
-                     aes(label = genes), 
-                     box.padding = 0.35, 
-                     point.padding = 0.5,
-                     segment.color = 'grey50',
-                     fill = "white", 
-                     color = "red") +
-    geom_point(data = subset(matrix, genes %in% marker_genes & !(genes %in% significant_marker_genes$genes)), 
-               aes(color = 'red')) +
+    geom_point(
+      aes(label = genes), 
+      alpha = 0.3, # Set opacity 30%
+      color = "black", # Default color for non-significant points
+      size = 3 # Adjust size as needed
+    ) +
+    geom_point(
+      data = significant_marker_genes, 
+      aes(color = 'blue'), # Set specific color for significant marker genes
+      size = 3 # Keep size consistent
+    ) +
+    geom_point(
+      data = subset(matrix, genes %in% marker_genes & !(genes %in% significant_marker_genes$genes)),
+      aes(color = 'red'), # Set specific color for other specified marker genes
+      size = 3 # Keep size consistent
+    ) +
+    geom_label_repel(
+      data = significant_marker_genes, 
+      aes(label = genes), 
+      box.padding = 0.35, 
+      point.padding = 0.5,
+      segment.color = 'grey50',
+      fill = "white", 
+      color = "blue",
+      max.overlaps = Inf,
+      nudge_x = (x_range[2] - x_range[1]) * 0.2, # Nudge labels horizontally
+      nudge_y = (y_range[2] - y_range[1]) * 0.2 # Nudge labels vertically
+    ) +
+    geom_label_repel(
+      data = subset(matrix, genes %in% marker_genes & !(genes %in% significant_marker_genes$genes)), 
+      aes(label = genes), 
+      box.padding = 0.35, 
+      point.padding = 0.5,
+      segment.color = 'grey50',
+      fill = "white", 
+      color = "red",
+      max.overlaps = Inf,
+      nudge_x = (x_range[2] - x_range[1]) * 0.1, # Nudge labels horizontally
+      nudge_y = (y_range[2] - y_range[1]) * 0.1 # Nudge labels vertically
+    ) +
     theme_cowplot() +
-    theme(legend.position = "none")
+    theme(legend.position = "none") +
+    expand_limits(x = x_range + c(-1, 2) * 0.5, y = y_range + c(-1, 1) * 0.5) # Expand plot limits
 }
+
 ```
 
 Create volcano plots for each cell for above and below age 70
