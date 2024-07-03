@@ -10,18 +10,16 @@ library(tidyverse)
 library(edgeR)
 library(markerGeneProfile) 
 library(matrixStats)
-library(cowplot)
+library(cowplot) 
 library(broom)
 library(knitr)
 library(ggpubr)
-library(biomaRt)
 library(ggrepel)
 library(patchwork)
 library(ggsignif)
 library(modelr)
 library(ggbeeswarm)
 library(lemon)
-library(extrafont)
 theme_set(theme_classic2())
 #Colour palette
 cbPalette = c("#56B4E9", "#009E73","#E69F00", "#0072B2", "#D55E00", "#CC79A7","#000000","#F0E442")
@@ -37,16 +35,21 @@ mgp_estimations = mgp_estimations %>% filter(ageDeath >= 15)
 mgp_estimations$newStudy = mgp_estimations$newStudy %>% factor(levels = c("Pitt", "GVEX", "NIMH_HBCC", "LIBD_szControl", "MSSM", "Penn"))
 mgp_estimations_long = mgp_estimations %>% pivot_longer(cols = Astrocyte:VLMC, names_to = 'cell_type', values_to = 'rel_prop') %>%
   mutate(cell_class = case_when(
-    cell_type %in% c("LAMP5", "PAX6", "PVALB", "SST", "VIP") ~ "Inhibitory",
+    cell_type %in% c( "PVALB", "SST", "VIP", "LAMP5", "PAX6") ~ "Inhibitory",
     cell_type %in% c("IT", "L4.IT", "L5.ET", "L5.6.IT.Car3", "L5.6.NP", "L6.CT", "L6b") ~ "Excitatory",
     TRUE ~ "Non-Neuronal"
   ))
+mgp_estimations_long$cell_type = mgp_estimations_long$cell_type %>% factor(levels = c("PVALB", "SST", "VIP", "LAMP5", "PAX6", "IT", "L4.IT", "L5.ET", "L5.6.IT.Car3", "L5.6.NP", "L6.CT", "L6b", "Astrocyte", "Endothelial", "Microglia", "Oligodendrocyte", "OPC", "Pericyte", "VLMC"))
+mgp_estimations_long$cell_class = mgp_estimations_long$cell_class %>% factor(levels = c("Inhibitory", "Excitatory", "Non-Neuronal"))
+
 acc_estimations_long = acc_estimations %>% pivot_longer(cols = Astrocyte:VLMC, names_to = 'cell_type', values_to = 'rel_prop') %>%
   mutate(cell_class = case_when(
-    cell_type %in% c("LAMP5", "PAX6", "PVALB", "SST", "VIP") ~ "Inhibitory",
+    cell_type %in% c("PVALB", "SST", "VIP", "LAMP5", "PAX6") ~ "Inhibitory",
     cell_type %in% c("IT", "L4.IT", "L5.ET", "L5.6.IT.Car3", "L5.6.NP", "L6.CT", "L6b") ~ "Excitatory",
     TRUE ~ "Non-Neuronal"
   ))
+acc_estimations_long$cell_type = acc_estimations_long$cell_type %>% factor(levels = c("PVALB", "SST", "VIP", "LAMP5", "PAX6", "IT", "L4.IT", "L5.ET", "L5.6.IT.Car3", "L5.6.NP", "L6.CT", "L6b", "Astrocyte", "Endothelial", "Microglia", "Oligodendrocyte", "OPC", "Pericyte", "VLMC"))
+acc_estimations_long$cell_class = acc_estimations_long$cell_class %>% factor(levels = c("Inhibitory", "Excitatory", "Non-Neuronal"))
 #Load single cell samples 
 psychencode_snCTPs = read.csv('/external/rprshnas01/netdata_kcni/stlab/Xiaolin/cell_deconv_data/PsychEncode_label_transferred_snCTP.csv')
 snCTP_metadata = read.csv("~/cell_prop_psychiatry/data/psychencode_label_transferred_pseudobulk_metadata.csv")[,-1] %>%
@@ -236,6 +239,7 @@ snCTPs_long = psychencode_snCTPs %>%
   )) %>%  
   distinct(cell_type, unique_donor_ID, .keep_all = T)
 
+
 sn_mega_lms = snCTPs_long %>% filter(total_cells >= 500) %>%
   group_by(cell_type) %>%
   do(tidy(lm(scale(rel_prop) ~ scale(PMI) + Gender + Institution + Phenotype + scale(Age) * Phenotype, data = .))) %>%
@@ -382,13 +386,14 @@ ggsave(output_filename, figure_1, width = 11, height = 13, dpi = 500)
 Figure 2: Introducing and presenting an interaction between age and diagnosis w/rt cell proportion.
 ```{r, fig.height=13, fig.width=13}
 # Plot interaction beta values from meganalysis
-significant_mega = subset(mega_lms, padj <= 0.1 & term == "Age x Diagnosis" & cell_type %in% c("Astrocyte", "IT", "L5.6.NP", "LAMP5", "Microglia", "Pericyte", "PVALB", "SST", "VIP" ))
+significant_mega = subset(mega_lms, padj <= 0.1 & term == "Age x Diagnosis" & cell_type %in% c("Astrocyte", "IT", "L5.6.NP", "LAMP5", "Microglia", "Oligodendrocyte", "OPC", "Pericyte", "PVALB", "SST", "VIP" ))
 significant_mega$asterisks = ifelse(significant_mega$padj <= 0.01, "***",
                                    ifelse(significant_mega$padj <= 0.05, "**", "*"))
 significant_mega$vjust = ifelse(significant_mega$estimate >= 0, -3, 3)
 
 # Figure 2a: Results from interaction meganalysis stratified by cell class - plot interaction beta coeff
-figure_2a = mega_lms %>%  filter(cell_type %in% c("Astrocyte", "IT", "L5.6.NP", "LAMP5", "Microglia", "Pericyte", "PVALB", "SST", "VIP" )) %>%
+mega_lms$cell_type = mega_lms$cell_type %>% factor(levels = c("PVALB", "SST", "VIP", "LAMP5", "PAX6", "IT", "L4.IT", "L5.ET", "L5.6.IT.Car3", "L5.6.NP", "L6.CT", "L6b", "Astrocyte", "Endothelial", "Microglia", "Oligodendrocyte", "OPC", "Pericyte", "VLMC"))
+figure_2a = mega_lms %>%  filter(cell_type %in% c("Astrocyte", "IT", "L5.6.NP", "LAMP5", "Microglia", "Oligodendrocyte", "OPC","Pericyte", "PVALB", "SST", "VIP" )) %>%
   filter(term %in% 'Age x Diagnosis') %>% 
   ggplot(aes(x = cell_type, y = estimate)) + 
   geom_hline(yintercept = 0) + 
@@ -474,7 +479,7 @@ figure_2d = mega_lms_by_age_class %>%
   geom_errorbar(aes(ymin = estimate - std.error, ymax = estimate + std.error)) + 
   ylab('Beta Coefficient') + 
   xlab('\n \n Age Range') + 
-  scale_fill_manual(values = c("dodgerblue2", "firebrick2"), labels=c('Above 70', 'Below 70')) +
+  scale_fill_manual(values = c("mediumpurple3", "olivedrab3"), labels=c('Above 70', 'Below 70')) +
   geom_text(data = significant_mega_age_class,
             aes(age_class, estimate, label = asterisks), 
             vjust = significant_mega_age_class$vjust) +
@@ -502,33 +507,35 @@ ggsave(output_filename, figure_2, width = 13, height = 15, dpi = 500)
 ```
 
 Figure 3: Validating trends and interactions in ssRNAseq 
-```{r, fig.height= 12, fig.width=16}
+```{r, fig.height= 12, fig.width=12}
 # Figure 3a: snRNAseq cell proportions binned by age
 significant_sn_mega_by_age <- subset(sn_mega_lms_by_age, padj <= 0.1 & term == "SCZ" & cell_type %in% c("SST", "PVALB", "VIP"))
 significant_sn_mega_by_age$asterisks <- ifelse(significant_sn_mega_by_age$padj <= 0.01, "***",
                                          ifelse(significant_sn_mega_by_age$padj <= 0.05, "**", "*"))
 significant_sn_mega_by_age$vjust <- ifelse(significant_sn_mega_by_age$estimate >= 0, -5, 5)
 
-figure_3a <- sn_mega_lms_by_age %>% 
-  filter(term %in% 'SCZ' & cell_type %in% c("SST", "PVALB", "VIP")) %>% 
-  mutate(cell_type = fct_reorder(cell_type, estimate)) %>% 
-  ggplot(aes(x = age_group, y = estimate, fill = age_group)) + 
-  geom_hline(yintercept = 0) + 
-  geom_bar(stat = "identity", position = "dodge") + 
-  geom_errorbar(aes(ymin = estimate - std.error, ymax = estimate + std.error)) + 
-  ylab('Beta Coefficient') + 
-  xlab('Age Range (Above/Below 70)') + 
+figure_3a <- sn_mega_lms_by_age %>%
+  filter(term %in% 'SCZ' & cell_type %in% c("SST", "PVALB", "VIP")) %>%
+  mutate(cell_type = fct_reorder(cell_type, estimate)) %>%
+  ggplot(aes(x = age_group, y = estimate, fill = age_group)) +
+  geom_hline(yintercept = 0) +
+  geom_bar(stat = "identity", position = "dodge") +
+  geom_errorbar(aes(ymin = estimate - std.error, ymax = estimate + std.error)) +
+  ylab('Beta Coefficient') +
+  xlab('Age Range (Above/Below 70)') +
+  scale_fill_manual(values = c("mediumpurple3", "olivedrab3"), labels = c('Above 70', 'Below 70')) +
   geom_text(data = significant_sn_mega_by_age,
-            aes(age_group, estimate, label = asterisks), 
+            aes(age_group, estimate, label = asterisks),
             vjust = significant_sn_mega_by_age$vjust) +
-    theme(
-    axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1, size = 13), 
+  theme(
+    axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1, size = 13),
     axis.text.y = element_text(size = 15),
     axis.title.x = element_text(vjust = 1, size = 15),
     axis.title.y = element_text(size = 15),
-    strip.text.x = element_text(size = 14)) +
+    strip.text.x = element_text(size = 14),
+    legend.position = "none") +
   scale_y_continuous(limits = c(-1, 1)) +
-  facet_wrap(~cell_type, drop = T, scale = "free")
+  facet_wrap(~cell_type, drop = TRUE, scale = "free")
 
 # Figure 3b: Relative cell proportions from snCTPs
 figure_3b <- snCTPs_long %>% filter(total_cells >= 500) %>%
@@ -550,8 +557,8 @@ figure_3b <- snCTPs_long %>% filter(total_cells >= 500) %>%
     strip.text.x = element_text(size = 15),
     strip.text.y = element_text(size = 15)
   ) +
-  facet_rep_grid(rows = vars(cell_type),
-    cols = vars(Institution),
+  facet_rep_grid(rows = vars(Institution),
+    cols = vars(cell_type),
     drop = T,
     scale = "free",
     switch = "y",
@@ -562,11 +569,12 @@ figure_3b <- snCTPs_long %>% filter(total_cells >= 500) %>%
   scale_color_manual(values = c("dodgerblue2", "firebrick2"), labels=c('CON', 'SCZ'))
 
 # Figure 3c: Interaction terms for snRNAseq results
-significant_sn_mega <- subset(sn_mega_lms, padj <= 0.1 & term == "Interaction" & cell_type %in% c("Astrocyte", "IT", "L5.6.NP", "LAMP5", "Microglia", "Pericyte", "PVALB", "SST", "VIP" ))
+significant_sn_mega <- subset(sn_mega_lms, padj <= 0.1 & term == "Interaction" & cell_type %in% c("Astrocyte", "IT", "L5.6.NP", "LAMP5", "Microglia", "Oligodendrocyte", "OPC","Pericyte", "PVALB", "SST", "VIP" ))
 significant_sn_mega$asterisks <- ifelse(significant_sn_mega$padj <= 0.01, "***",
                                          ifelse(significant_sn_mega$padj <= 0.05, "**", "*"))
 significant_sn_mega$vjust <- ifelse(significant_sn_mega$estimate >= 0, -7, 7)
 
+sn_mega_lms$cell_type = sn_mega_lms$cell_type %>% factor(levels = c("PVALB", "SST", "VIP", "LAMP5", "PAX6", "IT", "L4.IT", "L5.ET", "L5.6.IT.Car3", "L5.6.NP", "L6.CT", "L6b", "Astrocyte", "Endothelial", "Microglia", "Oligodendrocyte", "OPC", "Pericyte", "VLMC"))
 figure_3c = sn_mega_lms %>% filter(cell_type %in% c("Astrocyte", "IT", "L5.6.NP", "LAMP5", "Microglia", "Pericyte", "PVALB", "SST", "VIP" )) %>%
   filter(term %in% 'Interaction') %>% 
   ggplot(aes(x = cell_type, y = estimate)) + 
@@ -590,17 +598,69 @@ figure_3c = sn_mega_lms %>% filter(cell_type %in% c("Astrocyte", "IT", "L5.6.NP"
 
 
 # Figure 3: Combined figure
-figure3_top = figure_3a + figure_3b + plot_layout(widths = c(2,3)) 
-figure_3 <- figure3_top/figure_3c
-figure_3 = figure_3 + plot_annotation(tag_levels = 'A') + plot_layout(heights = c(2,3)) & theme(plot.tag = element_text(size = 25))
+figure_3_top = figure_3b
+figure_3_bottom  = figure_3c + figure_3a + plot_layout(widths = c(2,1)) 
+figure_3 <- figure_3_top/figure_3_bottom
+figure_3 = figure_3 + plot_annotation(tag_levels = 'A') + plot_layout(heights = c(2,1)) & theme(plot.tag = element_text(size = 25))
 figure_3
 
 #Save to plots folder
 output_filename <- "~/cell_prop_psychiatry/plots/figure_3.jpg"
 
 # Use ggsave to save the plot as a JPG image
-ggsave(output_filename, figure_3, width = 16, height = 12, dpi = 500)
+ggsave(output_filename, figure_3, width = 13, height = 16, dpi = 500)
 
 ```
 
+Figure 5: AgeOnset vs. MGP
+```{r, fig.width=9, fig.height=6}
+#Duration of Illness
+mgp_estimations_long$durationIllness <- mgp_estimations_long$ageDeath - mgp_estimations_long$ageOnset
+
+CELL_TYPES = c("SST", "PVALB", "VIP")
+DATASETS = c("GVEX", "LIBD_szControl")
+ageOnset_residuals_data = matrix(ncol = (ncol(mgp_estimations_long)+1), nrow = 0) %>% data.frame()
+colnames(ageOnset_residuals_data) = c(colnames(mgp_estimations_long), "resid")
+
+for(DATASET in DATASETS) {
+  for(CELL_TYPE in CELL_TYPES) {
+    #Create res_model without ageOnset variable
+    res_model_data = mgp_estimations_long %>% filter(primaryDiagnosis %in% c('Schizophrenia'), cell_type == CELL_TYPE , dataset == DATASET, is.na(ageOnset) == F)
+    #Model without ageOnset
+    res_model = lm(scale(rel_prop) ~ scale(ageDeath) + scale(RIN) + scale(PMI) + reportedGender, data = res_model_data)
+    #Calculate residuals and add column to res_model_data
+    res_model_data = res_model_data %>% add_residuals(var = "resid", model = res_model)
+    ageOnset_residuals_data = ageOnset_residuals_data %>% rbind(res_model_data)
+  }
+}
+
+figure_5 <- ageOnset_residuals_data %>%
+  ggplot(aes(x = ageOnset, y = resid, color = dataset)) +
+  geom_point(alpha = 0.5, size = 0.5) + 
+  geom_smooth(se = FALSE, method = 'lm', fullrange = TRUE) +
+  ylab('rCTP residuals (AU)') + 
+  xlab('Age of SCZ onset') + 
+  theme(
+    axis.text.x = element_text(size = 16),
+    axis.text.y = element_text(size = 16),
+    axis.title.x = element_text(vjust = -2, size = 16, margin = margin(t = 8)),
+    axis.title.y = element_text(size = 16),
+    strip.text = element_text(size = 16),
+    legend.text = element_text(size = 16),
+    plot.margin = margin(10, 10, 20, 10)) +
+  facet_grid(cols = vars(cell_type), rows = vars(dataset)) +
+  scale_y_continuous(limits = c(-1.5, 1.5)) + 
+  scale_color_manual(values = c("dodgerblue2", "firebrick2")) +
+  guides(color = guide_legend(title = NULL)) +
+  stat_cor(aes(label = paste(..r.label.., ..p.label.., sep = "~")), color = "black", geom = "label")
+
+
+figure_5
+
+#Save to plots folder
+output_filename <- "~/cell_prop_psychiatry/plots/figure_5.jpg"
+
+# Use ggsave to save the plot as a JPG image
+ggsave(output_filename, figure_5, width = 12, height = 9, dpi = 500)
+```
 

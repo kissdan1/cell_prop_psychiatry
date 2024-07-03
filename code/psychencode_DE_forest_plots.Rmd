@@ -4,12 +4,12 @@ author: "Daniel Kiss"
 date: "2/20/2024"
 output: html_document
 ---
-Packages etc.
+
 ```{r}
 library(dplyr)
 library(tidyverse)
 library(edgeR)
-library(markerGeneProfile) 
+library(markerGeneProfile)
 library(matrixStats)
 library(cowplot)
 library(broom)
@@ -19,67 +19,55 @@ library(ggrepel)
 library(patchwork)
 library(ggsignif)
 theme_set(theme_classic2())
-#Colour palette
-cbPalette = c("#56B4E9", "#009E73","#E69F00", "#0072B2", "#D55E00", "#CC79A7","#000000","#F0E442")
-```
 
-```{r}
+# Colour palette
+cbPalette = c("#56B4E9", "#009E73", "#E69F00", "#0072B2", "#D55E00", "#CC79A7", "#000000", "#F0E442")
+
 DE_results_ALL = readRDS("~/cell_prop_psychiatry/data/DE_results_ALL")
 DE_results_McLean = readRDS("~/cell_prop_psychiatry/data/DE_results_McLean")
 DE_results_MtSinai = readRDS("~/cell_prop_psychiatry/data/DE_results_MtSinai")
 
 markers = read.csv("~/cell_prop_psychiatry/data/MGP_markers.csv")
-SST_markers = c("GRIK1","CRHBP","COL25A1","CORT","ELFN1", "SST" )
+SST_markers = c("GRIK1","CRHBP","COL25A1","CORT","ELFN1", "SST")
 PVALB_markers = c("WNT16","TAC1","MYO5B","OSTN","KCNS3","BTBD11", "PVALB")
 VIP_markers = c("CALB2","TAC3","CHRNA2","PTHLH","NPR3","THSD7B","RGS8","SLC10A4","KMO", "VIP")
 
-cbPalette = cbPalette <- c("#56B4E9", "#009E73", "#E69F00", "#0072B2", 
-               "#D55E00", "#CC79A7", "#000000", "#8B4513", 
-               "#FFB6C1", "#6A5ACD", "#7FFF00")
-```
+cbPalette = c("#56B4E9", "#009E73", "#E69F00", "#0072B2", "#D55E00", "#CC79A7", "#000000", "#8B4513", "#FFB6C1", "#6A5ACD", "#7FFF00")
 
-
-```{r}
 CELL_TYPES = c("SST", "PVALB", "VIP")
-DATASET = c("MtSinai") #Vector of dataset names (can be length = 1)
+DATASET = c("MtSinai")
 
 if (length(DATASET) > 1) {
   DE_results <- DE_results_ALL
 } else {
   DE_results <- get(paste0("DE_results_", DATASET))
 }
-
 ```
+
 ```{r}
 # Function to generate bar plots for a single gene in a specific cell type
 generateSingleGeneBarPlot <- function(de_results_mclean, de_results_mtsinai, gene, cell_type) {
-  # Extract the relevant DE tables
   mclean_under <- de_results_mclean$DE_tables$DE_under
   mclean_over <- de_results_mclean$DE_tables$DE_over
   mtsinai_under <- de_results_mtsinai$DE_tables$DE_under
   mtsinai_over <- de_results_mtsinai$DE_tables$DE_over
   
-  # Combine under and over data for each dataset
   mclean_data <- rbind(
     data.frame(mclean_under[mclean_under$genes == gene, ], age_group = "Under 70"),
     data.frame(mclean_over[mclean_over$genes == gene, ], age_group = "Over 70")
   )
-  mclean_data$dataset <- "McLean"
+  mclean_data$cohort <- "McLean"
   
   mtsinai_data <- rbind(
     data.frame(mtsinai_under[mtsinai_under$genes == gene, ], age_group = "Under 70"),
     data.frame(mtsinai_over[mtsinai_over$genes == gene, ], age_group = "Over 70")
   )
-  mtsinai_data$dataset <- "MtSinai"
+  mtsinai_data$cohort <- "MtSinai"
   
-  # Combine the data
   combined_data <- rbind(mclean_data, mtsinai_data)
-  
-  # Convert age group to a factor with specific levels for consistent plotting
   combined_data$age_group <- factor(combined_data$age_group, levels = c("Under 70", "Over 70"))
   
-  # Plotting
-  p <- ggplot(combined_data, aes(x = age_group, y = logFC, fill = dataset)) +
+  p <- ggplot(combined_data, aes(x = age_group, y = logFC, fill = cohort)) +
     geom_bar(stat = "identity", position = position_dodge(), color = "black") +
     geom_errorbar(aes(ymin = CI.L, ymax = CI.R), position = position_dodge(.9), width = 0.25) +
     scale_fill_manual(values = c("McLean" = "#009E73", "MtSinai" = "#E69F00")) +
@@ -88,120 +76,105 @@ generateSingleGeneBarPlot <- function(de_results_mclean, de_results_mtsinai, gen
     theme(
       axis.title = element_text(size = 14),
       axis.text = element_text(size = 12),
-      legend.position = "none"  # Remove legend
+      legend.position = "none"
     )
   
   return(p)
 }
 
-
-# Generate bar plots for each marker gene in their respective cell types
 SST_barplot <- generateSingleGeneBarPlot(DE_results_McLean$SST, DE_results_MtSinai$SST, "SST", "SST")
 PVALB_barplot <- generateSingleGeneBarPlot(DE_results_McLean$PVALB, DE_results_MtSinai$PVALB, "PVALB", "PVALB")
 VIP_barplot <- generateSingleGeneBarPlot(DE_results_McLean$VIP, DE_results_MtSinai$VIP, "VIP", "VIP")
+
 
 ```
 
 Function to generate forest plots
 ```{r}
-generateForestPlot <- function(data_under, data_over, marker_genes, min_logFC, max_logFC) {
-  # Combine the under and over data into one dataframe with an age group label
-  data_under$age_group <- "Under 70"
-  data_over$age_group <- "Over 70"
-  combined_data <- rbind(data_under, data_over)
-
-  # Filter for marker genes
+generateForestPlot <- function(data_mclean, data_mtsinai, marker_genes, min_logFC, max_logFC, age_group) {
+  data_mclean$cohort <- "McLean"
+  data_mtsinai$cohort <- "MtSinai"
+  
+  combined_data <- rbind(data_mclean, data_mtsinai)
+  combined_data$age_group <- age_group
+  
   marker_data <- combined_data[combined_data$genes %in% marker_genes, ]
-
-  # Use the predefined order of marker genes instead of determining dynamically
-  under70_order <- marker_genes  # Use directly the predefined order
-
-  # Assign unique y-positions for each gene-age group combination
-  # Order to plot Under 70 first, then Over 70 for each gene
   marker_data <- marker_data %>%
-    arrange(factor(genes, levels = under70_order), age_group) %>%
-    mutate(y_position = as.numeric(factor(paste(genes, age_group), levels = unique(paste(genes, age_group)))))
-
-  # Determine label positions centrally between the pairs
+    arrange(factor(genes, levels = marker_genes), cohort) %>%
+    mutate(y_position = as.numeric(factor(paste(genes, cohort), levels = unique(paste(genes, cohort)))))
+  
   label_positions <- unique(marker_data$genes)
   breaks_y <- sapply(label_positions, function(gene) {
     mean(marker_data$y_position[marker_data$genes == gene])
   })
-
-  # Plotting
-  p <- ggplot(marker_data, aes(x = logFC, y = y_position, xmin = CI.L, xmax = CI.R, color = age_group)) +
+  
+  p <- ggplot(marker_data, aes(x = logFC, y = y_position, xmin = CI.L, xmax = CI.R, color = cohort)) +
     geom_point(size = 4) +
     geom_errorbarh(aes(height = 0.4), size = 1, width = 0.2) +
     geom_vline(xintercept = 0, linetype = "dotted") +
-    scale_color_manual(values = c("Under 70" = "dodgerblue2", "Over 70" = "firebrick2")) +
+    scale_color_manual(values = c("McLean" = "#009E73", "MtSinai" = "#E69F00")) +
     xlab("Log Fold Change") + ylab("Gene") +
     scale_y_continuous(breaks = breaks_y, labels = label_positions) +
-    coord_cartesian(xlim = c(min_logFC, max_logFC)) + # Set custom X-axis limits based on provided min and max logFC
+    coord_cartesian(xlim = c(min_logFC, max_logFC)) +
     theme(
-      axis.title = element_text(size = 16), # Size of the axis titles
-      axis.text.x = element_text(size = 12), # Size of the x-axis labels
-      axis.text.y = element_text(size = 14), # Increased size of the y-axis labels
+      axis.title = element_text(size = 16),
+      axis.text.x = element_text(size = 12),
+      axis.text.y = element_text(size = 14),
       legend.title = element_blank(),
-      legend.text = element_text(size = 12), # Size of the legend text
+      legend.text = element_text(size = 12),
       plot.title = element_text(size = 20, face = "bold"),
       strip.text = element_text(size = 16)
-    )
-
+    ) +
+    ggtitle(paste(age_group))
+  
   return(p)
 }
 
 ```
 
-Plot McLean data
+Plot Under_70 data
 ```{r, fig.height= 10, fig.width= 6}
 # Calculate the maximum logFC across all datasets for consistent x-axis limits
-min_logFC = -3.2
-max_logFC = 1.5
+min_logFC = -1.6
+max_logFC = 1.9
 
 # Generate plots using the newly calculated max_logFC
-SST_forest <- generateForestPlot(DE_results_McLean$SST$DE_tables$DE_under, DE_results_McLean$SST$DE_tables$DE_over, SST_markers, min_logFC, max_logFC)
-PVALB_forest <- generateForestPlot(DE_results_McLean$PVALB$DE_tables$DE_under, DE_results_McLean$PVALB$DE_tables$DE_over, PVALB_markers, min_logFC, max_logFC)
-VIP_forest <- generateForestPlot(DE_results_McLean$VIP$DE_tables$DE_under, DE_results_McLean$VIP$DE_tables$DE_over, VIP_markers, min_logFC, max_logFC)
+SST_forest_under70 <- generateForestPlot(DE_results_McLean$SST$DE_tables$DE_under, DE_results_MtSinai$SST$DE_tables$DE_under, SST_markers, min_logFC, max_logFC, "Under 70")
+PVALB_forest_under70 <- generateForestPlot(DE_results_McLean$PVALB$DE_tables$DE_under, DE_results_MtSinai$PVALB$DE_tables$DE_under, PVALB_markers, min_logFC, max_logFC, "Under 70")
+VIP_forest_under70 <- generateForestPlot(DE_results_McLean$VIP$DE_tables$DE_under, DE_results_MtSinai$VIP$DE_tables$DE_under, VIP_markers, min_logFC, max_logFC, "Under 70")
 
-McLean_forest = ggarrange(PVALB_forest, SST_forest,  VIP_forest,
+
+under70_forest <- ggarrange(PVALB_forest_under70, SST_forest_under70, VIP_forest_under70,
                       labels = c("A", "B", "C"),
                       nrow = 3,
                       hjust = 0,
                       heights = c(6, 5, 8),
-                      common.legend = T,
+                      common.legend = TRUE,
                       align = 'v',
-                      font.label = list(size = 32, face = "bold")) %>% 
-                      annotate_figure(top = text_grob(paste("McLean snRNAseq"), size = 28, face = "bold"))
-McLean_forest
+                      font.label = list(size = 32, face = "bold"))
 
-output_filename <- "~/cell_prop_psychiatry/plots/DE_forest_McLean.jpg"
-ggsave(output_filename, McLean_forest, width = 6, height = 10, dpi = 400)
+
 ```
 
-Plot MtSinai data
+Plot Over_70 data
 ```{r, fig.height= 10, fig.width= 6}
-# Calculate the maximum logFC across all datasets for consistent x-axis limits
-min_logFC = -1.2
-max_logFC = 2.2
+min_logFC = -3.1
+max_logFC = 1.6
 
-# Generate plots using the newly calculated max_logFC
-SST_forest <- generateForestPlot(DE_results_MtSinai$SST$DE_tables$DE_under, DE_results_MtSinai$SST$DE_tables$DE_over, SST_markers, min_logFC, max_logFC)
-PVALB_forest <- generateForestPlot(DE_results_MtSinai$PVALB$DE_tables$DE_under, DE_results_MtSinai$PVALB$DE_tables$DE_over, PVALB_markers, min_logFC, max_logFC)
-VIP_forest <- generateForestPlot(DE_results_MtSinai$VIP$DE_tables$DE_under, DE_results_MtSinai$VIP$DE_tables$DE_over, VIP_markers, min_logFC, max_logFC)
+SST_forest_over70 <- generateForestPlot(DE_results_McLean$SST$DE_tables$DE_over, DE_results_MtSinai$SST$DE_tables$DE_over, SST_markers, min_logFC, max_logFC, "Over 70")
+PVALB_forest_over70 <- generateForestPlot(DE_results_McLean$PVALB$DE_tables$DE_over, DE_results_MtSinai$PVALB$DE_tables$DE_over, PVALB_markers, min_logFC, max_logFC, "Over 70")
+VIP_forest_over70 <- generateForestPlot(DE_results_McLean$VIP$DE_tables$DE_over, DE_results_MtSinai$VIP$DE_tables$DE_over, VIP_markers, min_logFC, max_logFC, "Over 70")
 
-MtSinai_forest = ggarrange(PVALB_forest, SST_forest,  VIP_forest,
-                      labels = c("", "", ""),
+
+over70_forest <- ggarrange(PVALB_forest_over70, SST_forest_over70, VIP_forest_over70,
+                      labels = c("A", "B", "C"),
                       nrow = 3,
                       hjust = 0,
                       heights = c(6, 5, 8),
-                      common.legend = T,
+                      common.legend = TRUE,
                       align = 'v',
-                      font.label = list(size = 32, face = "bold")) %>% 
-                      annotate_figure(top = text_grob(paste("MtSinai snRNAseq"), size = 28, face = "bold"))
-MtSinai_forest
+                      font.label = list(size = 32, face = "bold"))
 
-output_filename <- "~/cell_prop_psychiatry/plots/DE_forest_MtSinai.jpg"
-ggsave(output_filename, MtSinai_forest, width = 6, height = 10, dpi = 400)
 ```
 
 Combine barplots
@@ -215,16 +188,15 @@ combined_barplots =  ggarrange(PVALB_barplot, SST_barplot,  VIP_barplot,
                       align = 'v',
                       font.label = list(size = 32, face = "bold")) %>% 
                       annotate_figure(top = text_grob(paste(""), size = 28, face = "bold"))
-combined_barplots
 ```
 
 
 Combine all figures
 ```{r, fig.height= 10, fig.width= 14}
-combined_figure = combined_barplots + McLean_forest + MtSinai_forest
+combined_figure = combined_barplots + under70_forest + over70_forest
 combined_figure = combined_figure + plot_layout(widths = c(2,3,3))
+combined_figure
 
 ggsave("~/cell_prop_psychiatry/plots/figure_4.jpg",combined_figure, width = 14, height = 10, dpi = 400)
 ```
-
 
