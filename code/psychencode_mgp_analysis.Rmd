@@ -67,7 +67,7 @@ LIBD_metadata = read.delim("/external/rprshnas01/external_data/psychencode/Psych
 CMC_metadata = read.csv("/external/rprshnas01/external_data/psychencode/PsychENCODE/CMC/Metadata/SYNAPSE_TABLE_QUERY_123020650.csv") %>% filter(dataType == "geneExpression", fileFormat == "tsv")  %>% left_join(psychencode_metadata)
 names(CMC_metadata)[names(CMC_metadata) == "Individual_ID"] = "individualID"
 
-#Change LIBD NAs to LIBD_szControl
+#Change LIBD NAs to LIBD_szControl 
 LIBD_metadata[which(is.na(LIBD_metadata$individualIdSource)), 'individualIdSource'] = 'LIBD_szControl'
 
 columns = names(GVEX_metadata) %>% intersect(names(LIBD_metadata)) %>% intersect(names(CMC_metadata))

@@ -50,7 +50,10 @@ acc_estimations_long = acc_estimations %>% pivot_longer(cols = Astrocyte:VLMC, n
   ))
 acc_estimations_long$cell_type = acc_estimations_long$cell_type %>% factor(levels = c("PVALB", "SST", "VIP", "LAMP5", "PAX6", "IT", "L4.IT", "L5.ET", "L5.6.IT.Car3", "L5.6.NP", "L6.CT", "L6b", "Astrocyte", "Endothelial", "Microglia", "Oligodendrocyte", "OPC", "Pericyte", "VLMC"))
 acc_estimations_long$cell_class = acc_estimations_long$cell_class %>% factor(levels = c("Inhibitory", "Excitatory", "Non-Neuronal"))
-#Load single cell samples 
+```
+
+Load snRNAseq proportions
+```{r}
 psychencode_snCTPs = read.csv('/external/rprshnas01/netdata_kcni/stlab/Xiaolin/cell_deconv_data/PsychEncode_label_transferred_snCTP.csv')
 snCTP_metadata = read.csv("~/cell_prop_psychiatry/data/psychencode_label_transferred_pseudobulk_metadata.csv")[,-1] %>%
   group_by(ID) %>%
@@ -64,7 +67,10 @@ snCTP_metadata =  snCTP_metadata %>%
     Age < 70 ~ "Under_70", Age >= 70 ~ "Over_70")) 
 snCTP_metadata$age_group = snCTP_metadata$age_group %>% factor(levels = c("Under_70", "Over_70"))
 psychencode_snCTPs = left_join(snCTP_metadata, psychencode_snCTPs) 
+```
 
+```{r}
+ling_snCTPs = read.csv("~/cell_prop_psychiatry/data/ling_snCTP_estimations")
 ```
 
 Cohort demographic summary
@@ -86,8 +92,8 @@ Residualize MGPs based on linear model
 ```{r}
 mgp_estimations_long = mgp_estimations_long %>%
   group_by(cell_type) %>%
-  mutate(resid = resid(lm(scale(rel_prop) ~ scale(RIN) + scale(ageDeath) + scale(PMI) +
-               reportedGender, data = cur_data()))) %>%
+  mutate(resid = resid(lm(scale(rel_prop) ~ scale(RIN) + scale(ageDeath) + scale(PMI) + 
+                reportedGender))) %>%
   ungroup()
 ```
 
@@ -225,6 +231,26 @@ mega_lms_by_age_class = mgp_estimations_long %>%
                        `scale(RIN)` = "RIN")) %>%
   merge(unique(mgp_estimations_long[c('cell_class', 'cell_type')]), by.x = "cell_type") 
 
+#same but stratify by cohort
+lms_by_age_class = mgp_estimations_long %>% 
+  group_by(age_class, cell_type, newStudy) %>%
+  do(tidy(lm(scale(rel_prop) ~ scale(RIN) + scale(PMI) +
+             reportedGender + primaryDiagnosis, data = .))) %>%
+  ungroup() %>% 
+  mutate(padj = p.adjust(`p.value`, method = 'fdr'),
+         term = recode(term,
+                       `(Intercept)` = "Intercept",
+                       `reportedGendermale` = "gender:Male",
+                       `primaryDiagnosisSchizophrenia` = "SCZ",
+                       `scale(ageDeath)` = "Age",
+                       `scale(PMI)` = "PMI", 
+                       `newStudyNIMH_HBCC` = "NIMH_HBCC",
+                       `newStudyPitt` = "Pitt",
+                       `newStudyMSSM` = "MSSM",
+                       `newStudyPenn` = "Penn",
+                       `scale(RIN)` = "RIN")) %>%
+  merge(unique(mgp_estimations_long[c('cell_class', 'cell_type')]), by.x = "cell_type") 
+
 
 ```
 
@@ -274,6 +300,26 @@ Single Cell Meganalysis based on age +/- 70
 sn_mega_lms_by_age = snCTPs_long %>% filter(total_cells >= 500) %>%
   group_by(cell_type, age_group) %>%
   do(tidy(lm(scale(rel_prop) ~ scale(PMI) + Gender + Institution + Phenotype, data = .))) %>%
+  ungroup() %>%
+  mutate(padj = p.adjust(`p.value`, method = 'fdr')) %>%
+  mutate(term = recode(term,
+                       `(Intercept)` = "Intercept",
+                       `reportedGendermale` = "gender:Male",
+                       `PhenotypeSZ` = "SCZ",
+                       `primaryDiagnosisBipolar Disorder` = "BP",
+                       `DxMDD` = "MDD",
+                       `scale(ageDeath)` = "Age",
+                       `scale(PMI)` = "PMI", 
+                       `newStudyNIMH_HBCC` = "NIMH_HBCC",
+                       `newStudyPitt` = "Pitt",
+                       `newStudyMSSM` = "MSSM",
+                       `newStudyPenn` = "Penn",
+                       `scale(RIN)` = "RIN"))
+
+#again but stratified by cohort
+sn_lms_by_age = snCTPs_long %>% filter(total_cells >= 500) %>%
+  group_by(cell_type, age_group, Institution) %>%
+  do(tidy(lm(scale(rel_prop) ~ scale(PMI) + Gender + Phenotype, data = .))) %>%
   ungroup() %>%
   mutate(padj = p.adjust(`p.value`, method = 'fdr')) %>%
   mutate(term = recode(term,
@@ -636,7 +682,7 @@ for(DATASET in DATASETS) {
 
 figure_5 <- ageOnset_residuals_data %>%
   ggplot(aes(x = ageOnset, y = resid, color = dataset)) +
-  geom_point(alpha = 0.5, size = 0.5) + 
+  geom_point(alpha = 0.5, size = 0.8) + 
   geom_smooth(se = FALSE, method = 'lm', fullrange = TRUE) +
   ylab('rCTP residuals (AU)') + 
   xlab('Age of SCZ onset') + 
@@ -661,6 +707,6 @@ figure_5
 output_filename <- "~/cell_prop_psychiatry/plots/figure_5.jpg"
 
 # Use ggsave to save the plot as a JPG image
-ggsave(output_filename, figure_5, width = 12, height = 9, dpi = 500)
+ggsave(output_filename, figure_5, width = 9, height = 7, dpi = 500)
 ```
 

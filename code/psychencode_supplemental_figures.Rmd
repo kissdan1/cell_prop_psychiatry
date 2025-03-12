@@ -42,6 +42,7 @@ acc_estimations_long = acc_estimations %>% pivot_longer(cols = Astrocyte:VLMC, n
     cell_type %in% c("IT", "L4.IT", "L5.ET", "L5.6.IT.Car3", "L5.6.NP", "L6.CT", "L6b") ~ "Excitatory",
     TRUE ~ "Non-Neuronal"
   ))
+acc_estimations_long$cell_class = acc_estimations_long$cell_class %>% factor(levels = c("Inhibitory", "Excitatory", "Non-Neuronal"))
 
 ```
 
@@ -222,6 +223,26 @@ acc_mega_lms_by_age_class = acc_estimations_long %>%
                        `scale(RIN)` = "RIN")) %>%
   merge(unique(acc_estimations_long[c('cell_class', 'cell_type')]), by.x = "cell_type")
 
+#Repeat with cohort stratification
+acc_lms_by_age_class = acc_estimations_long %>% 
+  group_by(age_class, cell_type, newStudy) %>%
+  do(tidy(lm(scale(rel_prop) ~ scale(RIN) + scale(PMI) +
+             reportedGender + primaryDiagnosis, data = .))) %>%
+  ungroup() %>% 
+  mutate(padj = p.adjust(`p.value`, method = 'fdr'),
+         term = recode(term,
+                       `(Intercept)` = "Intercept",
+                       `reportedGendermale` = "gender:Male",
+                       `primaryDiagnosisSchizophrenia` = "SCZ",
+                       `scale(ageDeath)` = "Age",
+                       `scale(PMI)` = "PMI", 
+                       `newStudyNIMH_HBCC` = "NIMH_HBCC",
+                       `newStudyPitt` = "Pitt",
+                       `newStudyMSSM` = "MSSM",
+                       `newStudyPenn` = "Penn",
+                       `scale(RIN)` = "RIN")) %>%
+  merge(unique(acc_estimations_long[c('cell_class', 'cell_type')]), by.x = "cell_type")
+
 
 ```
 
@@ -345,6 +366,13 @@ significant_mega$asterisks = ifelse(significant_mega$padj <= 0.01, "***",
 significant_mega$vjust = ifelse(significant_mega$estimate >= 0, -2, 3)
 
 # Figure S2a: Results from interaction meganalysis stratified by cell class - plot interaction beta coeff
+acc_mega_lms$cell_type = factor(acc_mega_lms$cell_type, 
+                                levels = c("PVALB", "SST", "VIP", "LAMP5", "PAX6", 
+                                           "IT", "L4.IT", "L5.ET", "L5.6.IT.Car3", 
+                                           "L5.6.NP", "L6.CT", "L6b", "Astrocyte", 
+                                           "Endothelial", "Microglia", "Oligodendrocyte", 
+                                           "OPC", "Pericyte", "VLMC"))
+
 figure_S2a = acc_mega_lms %>% 
   filter(term %in% 'Age x Diagnosis') %>% 
   ggplot(aes(x = cell_type, y = estimate)) + 
@@ -448,6 +476,7 @@ figure_S2_top = (figure_S2b + figure_S2d) + plot_layout(widths = c(1.6, 1))
 figure_S2 = figure_S2_top / figure_S2c / figure_S2a
 figure_S2 = figure_S2 + plot_annotation(tag_levels = 'A') + plot_layout(heights = c(1, 1, 1)) & theme(plot.tag = element_text(size = 25))
 figure_S2
+
 
 # Save to plots folder
 output_filename <- "~/cell_prop_psychiatry/plots/figure_S2.jpg"

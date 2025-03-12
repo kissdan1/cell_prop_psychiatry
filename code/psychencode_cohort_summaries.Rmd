@@ -1,0 +1,169 @@
+---
+title: "Updated Analysis with Custom Cohort Order"
+author: "Daniel Kiss"
+date: "2/3/2025"
+output: html_document
+---
+
+```{r}
+library(dplyr)
+
+# -------------------------------------------------------------------
+# Define sample info for each data source:
+
+# For lms_by_age_class (Bulk, DLFPC)
+sample_info_lms <- tibble(
+  newStudy = c("Pitt", "GVEX", "NIMH_HBCC", "LIBD_szControl", "MSSM", "Penn"),
+  NumCases = c(57, 94, 96, 175, 149, 58),
+  NumControls = c(49, 75, 186, 223, 163, 37)
+)
+
+# For acc_lms_by_age_class (Bulk, ACC)
+sample_info_acc <- tibble(
+  newStudy = c("Pitt_ACC", "MSSM_ACC", "Penn_ACC"),
+  NumCases = c(58, 130, 43),
+  NumControls = c(88, 143, 23)
+)
+
+# For sn_lms_by_age (Single Nucleus, DLPFC) – keying on Institution.
+# Here, we will recode "MtSinai" as "MSSM (snRNA)" later.
+sample_info_sn <- tibble(
+  Institution = c("McLean", "MtSinai"),
+  NumCases = c(0, 0),
+  NumControls = c(430, 827)
+)
+
+# For ling_lms_by_age_class (Single Nucleus, DLPFC)
+sample_info_ling <- tibble(
+  Cohort_Name = "Ling",
+  NumCases = 94,
+  NumControls = 97
+)
+
+# -------------------------------------------------------------------
+# Process lms_by_age_class ------------------------------
+df1 <- lms_by_age_class %>%
+  filter(term == "SCZ", cell_type %in% c("PVALB", "SST", "VIP")) %>%
+  mutate(
+    # Look up number of cases and controls using newStudy and sample_info_lms
+    NumCases = sample_info_lms$NumCases[match(as.character(newStudy), sample_info_lms$newStudy)],
+    NumControls = sample_info_lms$NumControls[match(as.character(newStudy), sample_info_lms$newStudy)],
+    # Recode age_class into Age_Group
+    Age_Group = recode(age_class, "Under 70" = "Below 70", "Over 70" = "Above 70"),
+    # Calculate Effect based on padj and p.value
+    Effect = case_when(
+      padj <= 0.1 & estimate < 0 ~ "DOWN",
+      padj <= 0.1 & estimate > 0 ~ "UP",
+      padj > 0.1 & p.value <= 0.1 & estimate < 0 ~ "DOWN (trending)",
+      padj > 0.1 & p.value <= 0.1 & estimate > 0 ~ "UP (trending)",
+      TRUE ~ NA_character_
+    ),
+    # Recode newStudy to the desired display names:
+    #   "NIMH_HBCC" becomes "NIMH"
+    #   "LIBD_szControl" becomes "LIBD"
+    Cohort_Name = recode(newStudy, "NIMH_HBCC" = "NIMH", "LIBD_szControl" = "LIBD"),
+    Brain_Area = "DLFPC",
+    Assay = "Bulk"
+  ) %>%
+  select(Cohort_Name, Brain_Area, Assay, cell_type, NumCases, NumControls,
+         Age_Group, p.value, padj, Effect) %>%
+  rename(Cell_Type = cell_type)
+
+# -------------------------------------------------------------------
+# Process acc_lms_by_age_class ---------------------------
+df2 <- acc_lms_by_age_class %>%
+  filter(term == "SCZ", cell_type %in% c("PVALB", "SST", "VIP")) %>%
+  mutate(
+    NumCases = sample_info_acc$NumCases[match(as.character(newStudy), sample_info_acc$newStudy)],
+    NumControls = sample_info_acc$NumControls[match(as.character(newStudy), sample_info_acc$newStudy)],
+    Age_Group = recode(age_class, "Under 70" = "Below 70", "Over 70" = "Above 70"),
+    Effect = case_when(
+      padj <= 0.1 & estimate < 0 ~ "DOWN",
+      padj <= 0.1 & estimate > 0 ~ "UP",
+      padj > 0.1 & p.value <= 0.1 & estimate < 0 ~ "DOWN (trending)",
+      padj > 0.1 & p.value <= 0.1 & estimate > 0 ~ "UP (trending)",
+      TRUE ~ NA_character_
+    ),
+    # For ACC data, we keep newStudy as is.
+    Cohort_Name = newStudy,
+    Brain_Area = "ACC",
+    Assay = "Bulk"
+  ) %>%
+  select(Cohort_Name, Brain_Area, Assay, cell_type, NumCases, NumControls,
+         Age_Group, p.value, padj, Effect) %>%
+  rename(Cell_Type = cell_type)
+
+# -------------------------------------------------------------------
+# Process sn_lms_by_age -----------------------------------
+df3 <- sn_lms_by_age %>%
+  filter(term == "SCZ", cell_type %in% c("PVALB", "SST", "VIP")) %>%
+  mutate(
+    NumCases = sample_info_sn$NumCases[match(as.character(Institution), sample_info_sn$Institution)],
+    NumControls = sample_info_sn$NumControls[match(as.character(Institution), sample_info_sn$Institution)],
+    Age_Group = recode(age_group, "Under 70" = "Below 70", "Over 70" = "Above 70"),
+    Effect = case_when(
+      padj <= 0.1 & estimate < 0 ~ "DOWN",
+      padj <= 0.1 & estimate > 0 ~ "UP",
+      padj > 0.1 & p.value <= 0.1 & estimate < 0 ~ "DOWN (trending)",
+      padj > 0.1 & p.value <= 0.1 & estimate > 0 ~ "UP (trending)",
+      TRUE ~ NA_character_
+    ),
+    # Recode Institution: recode "MtSinai" as "MSSM (snRNA)" and leave "McLean" as is.
+    Cohort_Name = recode(Institution, "MtSinai" = "MSSM (snRNA)", "McLean" = "McLean"),
+    Brain_Area = "DLPFC",
+    Assay = "Single Nucleus"
+  ) %>%
+  select(Cohort_Name, Brain_Area, Assay, cell_type, NumCases, NumControls,
+         Age_Group, p.value, padj, Effect) %>%
+  rename(Cell_Type = cell_type)
+
+# -------------------------------------------------------------------
+# Process ling_lms_by_age_class ---------------------------
+df4 <- ling_lms_by_age_class %>%
+  filter(term == "SCZ", cell_type %in% c("PVALB", "SST", "VIP")) %>%
+  mutate(
+    NumCases = sample_info_ling$NumCases[match("Ling", sample_info_ling$Cohort_Name)],
+    NumControls = sample_info_ling$NumControls[match("Ling", sample_info_ling$Cohort_Name)],
+    Age_Group = recode(age_class, "Under 70" = "Below 70", "Over 70" = "Above 70"),
+    Effect = case_when(
+      padj <= 0.1 & estimate < 0 ~ "DOWN",
+      padj <= 0.1 & estimate > 0 ~ "UP",
+      padj > 0.1 & p.value <= 0.1 & estimate < 0 ~ "DOWN (trending)",
+      padj > 0.1 & p.value <= 0.1 & estimate > 0 ~ "UP (trending)",
+      TRUE ~ NA_character_
+    ),
+    Cohort_Name = "Ling",
+    Brain_Area = "DLPFC",
+    Assay = "Single Nucleus"
+  ) %>%
+  select(Cohort_Name, Brain_Area, Assay, cell_type, NumCases, NumControls,
+         Age_Group, p.value, padj, Effect) %>%
+  rename(Cell_Type = cell_type)
+
+# -------------------------------------------------------------------
+# Combine all data frames --------------------------------
+combined_df <- bind_rows(df1, df2, df3, df4)
+
+# Now reset the factor levels for Cohort_Name so that rows sort in the desired order.
+# Note: For lms_by_age_class, the original newStudy values have been recoded as:
+#   "MSSM", "Penn", "Pitt", "NIMH", "LIBD", "GVEX"
+# For acc_lms_by_age_class: "Pitt_ACC", "MSSM_ACC", "Penn_ACC" (we want order: MSSM_ACC, Penn_ACC, Pitt_ACC)
+# For sn_lms_by_age: we have "MSSM (snRNA)" and "McLean"
+# For ling_lms_by_age_class: "Ling"
+desired_order <- c("MSSM", "Penn", "Pitt", "NIMH", "LIBD", "GVEX",
+                   "MSSM_ACC", "Penn_ACC", "Pitt_ACC",
+                   "MSSM (snRNA)", "McLean",
+                   "Ling")
+
+combined_df <- combined_df %>%
+  mutate(Cohort_Name = factor(Cohort_Name, levels = desired_order)) %>%
+  arrange(Cohort_Name)
+
+
+# -------------------------------------------------------------------
+# Create a list divided by cell type:
+# Split combined_df into a list where each element corresponds to one cell type (PVALB, SST, or VIP)
+cell_type_list <- split(combined_df, combined_df$Cell_Type)
+```
+
+

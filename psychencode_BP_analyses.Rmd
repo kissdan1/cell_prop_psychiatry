@@ -1,0 +1,473 @@
+---
+title: "psychencode_BP_analyses"
+author: "Daniel Kiss"
+date: "10/31/2024"
+output: html_document
+---
+Packages etc.
+```{r}
+library(dplyr)
+library(tidyverse)
+library(edgeR)
+library(markerGeneProfile) 
+library(matrixStats)
+library(cowplot) 
+library(broom)
+library(knitr)
+library(ggpubr)
+library(ggrepel)
+library(patchwork)
+library(ggsignif)
+library(modelr)
+library(ggbeeswarm)
+library(lemon)
+theme_set(theme_classic2())
+#Colour palette
+cbPalette = c("#56B4E9", "#009E73","#E69F00", "#0072B2", "#D55E00", "#CC79A7","#000000","#F0E442")
+```
+
+
+Loading Data
+```{r}
+#Cell type proportions for each data set merged with metadata - ready for modelling 
+bp_mgp_estimations = read_csv( "/external/rprshnas01/kcni/dkiss/cell_prop_psychiatry/data/psychencode_bp_mgp_estimations.csv")
+
+#Factorize newStudy for aesthetic purposes (this orderl ooks good on graphs)
+bp_mgp_estimations = bp_mgp_estimations %>% filter(ageDeath >= 15, newStudy != "BipSeq")
+bp_mgp_estimations$newStudy = bp_mgp_estimations$newStudy %>% factor(levels = c("Pitt", "GVEX", "NIMH_HBCC", "MSSM", "BipSeq"))
+bp_mgp_estimations_long = bp_mgp_estimations %>% pivot_longer(cols = Astrocyte:VLMC, names_to = 'cell_type', values_to = 'rel_prop') %>%
+  mutate(cell_class = case_when(
+    cell_type %in% c( "PVALB", "SST", "VIP", "LAMP5", "PAX6") ~ "Inhibitory",
+    cell_type %in% c("IT", "L4.IT", "L5.ET", "L5.6.IT.Car3", "L5.6.NP", "L6.CT", "L6b") ~ "Excitatory",
+    TRUE ~ "Non-Neuronal"
+  ))
+bp_mgp_estimations_long$cell_type = bp_mgp_estimations_long$cell_type %>% factor(levels = c("PVALB", "SST", "VIP", "LAMP5", "PAX6", "IT", "L4.IT", "L5.ET", "L5.6.IT.Car3", "L5.6.NP", "L6.CT", "L6b", "Astrocyte", "Endothelial", "Microglia", "Oligodendrocyte", "OPC", "Pericyte", "VLMC"))
+bp_mgp_estimations_long$cell_class = bp_mgp_estimations_long$cell_class %>% factor(levels = c("Inhibitory", "Excitatory", "Non-Neuronal"))
+bp_mgp_estimations_long$primaryDiagnosis = bp_mgp_estimations_long$primaryDiagnosis %>% factor(levels = c("control", "Bipolar Disorder"))
+
+```
+
+Cohort demographic summary
+```{r}
+summary_df = bp_mgp_estimations %>%
+  mutate(individualIDSource = factor(newStudy, levels = c("Pitt", "GVEX", "NIMH_HBCC", "MSSM", "BipSeq"))) %>%
+    group_by(newStudy) %>%
+    summarise(
+        CohortName = first(newStudy),
+        PercentMale = mean(reportedGender == "male", na.rm = TRUE) * 100,
+        AvgAge = mean(ageDeath, na.rm = TRUE),
+        AgeSD = sd(ageDeath, na.rm = TRUE),
+        NumCases = sum(primaryDiagnosis == "Bipolar Disorder", na.rm = TRUE),
+        NumControls = sum(primaryDiagnosis == "control", na.rm = TRUE)
+    )
+```
+
+
+
+Model rCTPs based on diagnosis and covariates seperately in each cohort
+```{r}
+combined_lms = bp_mgp_estimations_long %>%
+  group_by(newStudy, cell_type) %>%
+  do(tidy(lm(scale(rel_prop) ~ scale(RIN) + scale(ageDeath) + scale(PMI) +
+               reportedGender + primaryDiagnosis, data = .))) %>%
+  ungroup() %>%
+  mutate(padj = p.adjust(p.value, method = 'fdr'),
+         term = recode(term,
+                       `(Intercept)` = "Intercept",
+                       `reportedGendermale` = "gender:Male",
+                       `primaryDiagnosisBipolar Disorder` = "BP",
+                       `scale(ageDeath)` = "Age",
+                       `scale(PMI)` = "PMI",
+                       `scale(RIN)` = "RIN")) %>%
+  merge(unique(bp_mgp_estimations_long[c('dataset', 'newStudy')]), by.x = "newStudy") %>%
+  merge(unique(bp_mgp_estimations_long[c('cell_class', 'cell_type')]), by.x = "cell_type") %>%
+  mutate(newStudy = factor(newStudy, levels = c("Pitt", "GVEX", "NIMH_HBCC", "MSSM", "BipSeq")))
+```
+
+Residualize MGPs based on linear model
+```{r}
+bp_mgp_estimations_long = bp_mgp_estimations_long %>%
+  group_by(cell_type) %>%
+  filter(!is.na(rel_prop) & !is.na(RIN) & !is.na(ageDeath) & !is.na(PMI) & !is.na(reportedGender)) %>%
+  mutate(resid = resid(lm(scale(rel_prop) ~ scale(RIN) + scale(ageDeath) + scale(PMI) + reportedGender))) %>%
+  ungroup()
+
+```
+
+```{r}
+interaction_lms = bp_mgp_estimations_long %>%
+  group_by(newStudy, cell_type) %>%
+  do(tidy(lm(scale(rel_prop) ~ scale(RIN) + scale(ageDeath) + scale(PMI) +
+               reportedGender + primaryDiagnosis + scale(ageDeath) * primaryDiagnosis, data = .))) %>%
+  ungroup() %>%
+  mutate(padj = p.adjust(`p.value`, method = 'fdr'),
+         term = recode(term,
+                       `(Intercept)` = "Intercept",
+                       `reportedGendermale` = "gender:Male",
+                       `primaryDiagnosisBipolar Disorder` = "BP",
+                       `scale(ageDeath):primaryDiagnosisBipolar Disorder` = "Age x Diagnosis",
+                       `scale(ageDeath)` = "Age",
+                       `scale(PMI)` = "PMI",
+                       `scale(RIN)` = "RIN")) %>%
+  merge(unique(bp_mgp_estimations_long[c('dataset', 'newStudy')]), by.x = "newStudy") %>%
+  merge(unique(bp_mgp_estimations_long[c('cell_class', 'cell_type')]), by.x = "cell_type") %>%
+  mutate(newStudy = factor(newStudy, levels = c("Pitt", "GVEX", "NIMH_HBCC", "MSSM", "BipSeq")))
+
+```
+
+
+Interaction mega-analysis w/ all data 
+```{r}
+mega_lms = bp_mgp_estimations_long %>% 
+  group_by(cell_type) %>%
+  do(tidy(lm(scale(rel_prop) ~ scale(RIN) + scale(ageDeath) + scale(PMI) +
+             reportedGender + primaryDiagnosis + newStudy + scale(ageDeath)*primaryDiagnosis, data = .))) %>%
+  ungroup() %>% 
+  mutate(padj = p.adjust(`p.value`, method = 'fdr'),
+         term = recode(term,
+                       `(Intercept)` = "Intercept",
+                       `reportedGendermale` = "gender:Male",
+                       `primaryDiagnosisBipolar Disorder` = "BP",
+                       `scale(ageDeath)` = "Age",
+                       `scale(ageDeath):primaryDiagnosisBipolar Disorder` = "Age x Diagnosis",
+                       `scale(PMI)` = "PMI", 
+                       `newStudyNIMH_HBCC` = "NIMH_HBCC",
+                       `newStudyLIBD_szControl` = "LIBD_szControl",
+                       `newStudyPitt` = "Pitt",
+                       `newStudyMSSM` = "MSSM",
+                       `newStudyPenn` = "Penn",
+                       `newStudyBipSeq` = "BipSeq",
+                       `scale(RIN)` = "RIN")) %>%
+  merge(unique(bp_mgp_estimations_long[c('cell_class', 'cell_type')]), by.x = "cell_type") 
+```
+
+Functions to  generate age range bins 
+```{r}
+# Create function to map age to age range with new ranges
+age_to_range = function(age) {
+    if(age >= 15 & age <= 30) {
+        return("15-30")
+    } else {
+        lower_bound = floor((age - 31) / 20) * 20 + 31
+        upper_bound = lower_bound + 19
+        return(paste0(lower_bound, "-", upper_bound))
+    }
+}
+
+# Create function to bin ages to >=70 and <70
+classify_ages = function(ages) {
+  classifications = ifelse(ages <= 70, "Under 70", "Over 70")
+  return(classifications)
+}
+```
+
+Create age groups from age 20-90 in increments of 20 years. Plot meganalysis beta coeffs against age group.
+```{r}
+bp_mgp_estimations_long$age_range = sapply(bp_mgp_estimations_long$ageDeath, age_to_range)
+
+mega_lms_by_age = bp_mgp_estimations_long %>% 
+  group_by(age_range, cell_type) %>%
+  do(tidy(lm(scale(rel_prop) ~ scale(RIN) + scale(PMI) +
+             reportedGender + primaryDiagnosis + newStudy, data = .))) %>%
+  ungroup() %>% 
+  mutate(padj = p.adjust(`p.value`, method = 'fdr'),
+         term = recode(term,
+                       `(Intercept)` = "Intercept",
+                       `reportedGendermale` = "gender:Male",
+                       `primaryDiagnosisBipolar Disorder` = "BP",
+                       `scale(ageDeath)` = "Age",
+                       `scale(PMI)` = "PMI", 
+                       `newStudyNIMH_HBCC` = "NIMH_HBCC",
+                       `newStudyPitt` = "Pitt",
+                       `newStudyMSSM` = "MSSM",
+                       `newStudyPenn` = "Penn",
+                       `newStudyBipSeq` = "BipSeq",
+                       `scale(RIN)` = "RIN")) %>%
+  merge(unique(bp_mgp_estimations_long[c('cell_class', 'cell_type')]), by.x = "cell_type") 
+```
+
+Bulk RNAseq Meganalysis based on age +/- 70
+```{r}
+bp_mgp_estimations_long$age_class <- sapply(bp_mgp_estimations_long$ageDeath, classify_ages) %>% factor(levels = c("Under 70", "Over 70"))
+mega_lms_by_age_class = bp_mgp_estimations_long %>% 
+  group_by(age_class, cell_type) %>%
+  do(tidy(lm(scale(rel_prop) ~ scale(RIN) + scale(PMI) +
+             reportedGender + newStudy + primaryDiagnosis, data = .))) %>%
+  ungroup() %>% 
+  mutate(padj = p.adjust(`p.value`, method = 'fdr'),
+         term = recode(term,
+                       `(Intercept)` = "Intercept",
+                       `reportedGendermale` = "gender:Male",
+                       `primaryDiagnosisBipolar Disorder` = "BP",
+                       `scale(ageDeath)` = "Age",
+                       `scale(PMI)` = "PMI", 
+                       `newStudyNIMH_HBCC` = "NIMH_HBCC",
+                       `newStudyPitt` = "Pitt",
+                       `newStudyMSSM` = "MSSM",
+                       `newStudyBipSeq` = "BipSeq",
+                       `newStudyPenn` = "Penn",
+                       `scale(RIN)` = "RIN")) %>%
+  merge(unique(bp_mgp_estimations_long[c('cell_class', 'cell_type')]), by.x = "cell_type") 
+
+
+```
+
+
+
+
+
+
+
+------------////FIGURES////------------
+
+Figure 1: Illustrating the association between cell prop and diagnosis and cohort specific differences
+```{r, fig.height=6.5, fig.width=5.5 }
+significant_combined = subset(combined_lms, padj < 0.1 & cell_type %in% c("PVALB", "SST", "VIP") & term == "BP")
+significant_combined$asterisks <- ifelse(significant_combined$padj <= 0.01, "***",
+                                         ifelse(significant_combined$padj <= 0.05, "**", "*"))
+significant_combined$vjust <- ifelse(significant_combined$estimate >= 0, -7, 7)
+
+figure_1b = combined_lms %>% 
+  filter(term == 'BP', cell_type %in% c("PVALB", "SST", "VIP")) %>% 
+  mutate(cell_type = fct_reorder(cell_type, estimate)) %>% 
+  ggplot(aes(x = newStudy, y = estimate, fill = newStudy)) + 
+  geom_hline(yintercept = 0) + 
+  geom_bar(stat = "identity", position = "dodge") + 
+  geom_errorbar(aes(ymin = estimate - std.error, ymax = estimate + std.error)) + 
+  ylab('Bipolar Disorder rCTP diff. (std. beta)
+') + 
+  xlab('') +
+  scale_fill_manual(values = cbPalette) +
+  geom_text(data = significant_combined,
+            aes(newStudy, estimate, label = asterisks), 
+            vjust = significant_combined$vjust) +
+  theme(
+    axis.text.x = element_blank(),
+    axis.text.y = element_text(size = 15),
+    axis.title.x = element_text(vjust = 6, size = 15),
+    axis.title.y = element_text(size = 16),
+    strip.text.x = element_text(size = 14),
+    axis.line.x = element_blank(), 
+    axis.ticks.x = element_blank()) +
+  facet_grid(~cell_type, drop = T, scale = "free_x", space = "free") +
+  guides(fill = guide_none()) +
+  scale_y_continuous(limits = c(-0.9, 1))
+
+# Figure 1c: Residualized MGPs vs. Diagnosis
+figure_1c <- bp_mgp_estimations_long %>%
+  filter(cell_type %in% c("PVALB", "SST", "VIP")) %>%
+  ggplot(aes(x = primaryDiagnosis, y = resid)) +
+  geom_boxplot(outlier.shape = NA, aes(fill = newStudy, alpha = 0.5), show.legend = F, notch = T) +
+  geom_beeswarm(size = 1, alpha = 0.3, aes(colour = newStudy), show.legend = F) +
+  ylab('rCTP residuals (AU)') + 
+  xlab('Diagnosis') + 
+  scale_x_discrete(labels = c("C", "BP")) +
+  scale_colour_manual(values = cbPalette) +
+  scale_fill_manual(values = cbPalette) +
+  theme(
+    axis.text.x = element_text(size = 15),
+    axis.text.y = element_text(size = 15),
+    axis.title.x = element_text(vjust = -2, size = 15),
+    axis.title.y = element_text(size = 15),
+    strip.text.x = element_text(size = 14),
+    strip.text.y = element_text(size = 14)) +
+  guides(fill = FALSE) +
+  facet_grid(rows = vars(cell_type), cols = vars(newStudy), drop = T, scale = "free", switch = "y", space = "free") +
+  geom_signif(comparisons = list(c("control", "Bipolar Disorder")), map_signif_level = TRUE, , test = wilcox.test) +
+  scale_y_continuous(limits = c(-3.5, 3.5)) 
+
+#Figure 1d - Hisotgram of cohort ages
+figure_1d = bp_mgp_estimations %>% 
+    ggplot(aes(x = ageDeath)) +
+    geom_histogram(aes(fill = newStudy)) +
+    facet_wrap(~ newStudy, nrow = 6, scales = "free_y") +
+    labs(x = "Age at death (years)", y = "Subject count") +
+    scale_fill_manual(values = c("#56B4E9", "#009E73","#E69F00", "#0072B2", "#D55E00", "#CC79A7")) + 
+  scale_y_continuous(n.breaks = 4) +
+  guides(fill = guide_none()) + 
+  theme(panel.grid = element_blank(),
+        strip.background = element_blank(),
+        strip.text = element_text(size = rel(0.9), face = "plain"),
+    axis.text.x = element_text(size = 13,),
+    axis.text.y = element_text(size = 13),
+    axis.title.x = element_text( size = 15),
+    axis.title.y = element_text(size = 16),
+    strip.text.x = element_text(size = 14))
+
+# Combine Figure 1
+figure_1_top = (figure_1b | figure_1d) + plot_layout(widths = c(4,2))
+figure_1_bottom = figure_1c
+  
+figure_1 =  figure_1_top / figure_1_bottom + plot_annotation(tag_levels = 'A') + plot_layout(heights = c(1, 1)) & theme(plot.tag = element_text(size = 25))
+figure_1
+
+
+
+```
+
+
+Figure 2: Introducing and presenting an interaction between age and diagnosis w/rt cell proportion.
+```{r, fig.height=6, fig.width=6}
+# Plot interaction beta values from meganalysis
+significant_mega = subset(mega_lms, padj <= 0.1 & term == "Age x Diagnosis" & cell_type %in% c("Astrocyte", "IT", "L5.6.NP", "LAMP5", "Microglia", "Oligodendrocyte", "OPC", "Pericyte", "PVALB", "SST", "VIP" ))
+significant_mega$asterisks = ifelse(significant_mega$padj <= 0.01, "***",
+                                   ifelse(significant_mega$padj <= 0.05, "**", "*"))
+significant_mega$vjust = ifelse(significant_mega$estimate >= 0, -3, 3)
+
+# Figure 2a: Results from interaction meganalysis stratified by cell class - plot interaction beta coeff
+mega_lms$cell_type = mega_lms$cell_type %>% factor(levels = c("PVALB", "SST", "VIP", "LAMP5", "PAX6", "IT", "L4.IT", "L5.ET", "L5.6.IT.Car3", "L5.6.NP", "L6.CT", "L6b", "Astrocyte", "Endothelial", "Microglia", "Oligodendrocyte", "OPC", "Pericyte", "VLMC"))
+figure_2a = mega_lms %>%  filter(cell_type %in% c("Astrocyte", "IT", "L5.6.NP", "LAMP5", "Microglia", "Oligodendrocyte", "OPC","Pericyte", "PVALB", "SST", "VIP" )) %>%
+  filter(term %in% 'Age x Diagnosis') %>% 
+  ggplot(aes(x = cell_type, y = estimate)) + 
+  geom_hline(yintercept = 0) + 
+  geom_bar(stat = "identity", position = "dodge") + 
+  facet_grid(~cell_class, drop = T, scale = "free_x", space = "free") +
+  geom_errorbar(aes(ymin = estimate - std.error, ymax = estimate + std.error)) + 
+  ylab('BP x Age at death interaction (std. beta)') + 
+  xlab('Cell Type') + 
+  geom_text(data = significant_mega,
+            aes(cell_type, estimate, label = asterisks), 
+            vjust = significant_mega$vjust) +
+  theme(
+    axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1, size = 12), 
+    axis.text.y = element_text(size = 15),
+    axis.title.x = element_text(vjust = 8, size = 15),
+    axis.title.y = element_text(size = 15),
+    strip.text.x = element_text(size = 14)) +
+  guides(fill = FALSE) +
+  scale_y_continuous(limits = c(-0.15, 0.32))
+
+# Figure 2b: Plot beta values from meganalysis in 10-year age bins for SST, PVALB, VIP
+significant_mega_age = subset(mega_lms_by_age, padj <= 0.1 & term == "BP" & cell_type %in% c("PVALB", "SST", "VIP"))
+significant_mega_age$asterisks = ifelse(significant_mega_age$padj <= 0.01, "***",
+                                         ifelse(significant_mega_age$padj <= 0.05, "**", "*"))
+significant_mega_age$vjust = ifelse(significant_mega_age$estimate >= 0, -2, 3)
+
+mega_lms_by_age$cell_type = mega_lms_by_age$cell_type %>% factor(levels = c("PVALB", "SST", "VIP", "LAMP5", "PAX6", "IT", "L4.IT", "L5.ET", "L5.6.IT.Car3", "L5.6.NP", "L6.CT", "L6b", "Astrocyte", "Endothelial", "Microglia", "Oligodendrocyte", "OPC", "Pericyte", "VLMC"))
+
+figure_2b = mega_lms_by_age %>% 
+  filter(term %in% 'BP' & cell_type %in% c("PVALB", "SST", "VIP")) %>% 
+  ggplot(aes(x = age_range, y = estimate)) + 
+  geom_hline(yintercept = 0) + 
+  geom_bar(stat = "identity", position = "dodge") + 
+  geom_errorbar(aes(ymin = estimate - std.error, ymax = estimate + std.error)) + 
+  ylab('Bipolar disorder rCTP diff. (std. beta)') + 
+  xlab('\n \n Age Range') + 
+  geom_text(data = significant_mega_age,
+            aes(age_range, estimate, label = asterisks), 
+            vjust = significant_mega_age$vjust) +
+   theme(
+    axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1, size = 13), 
+    axis.text.y = element_text(size = 15),
+    axis.title.x = element_text(vjust = 8, size = 15),
+    axis.title.y = element_text(size = 15),
+    strip.text.x = element_text(size = 14)) +
+  facet_wrap(~cell_type, drop = T, scale = "free_x") +
+  guides(fill = FALSE) +
+  scale_y_continuous(limits = c(-1.0, 1.4))
+
+
+# Figure 2c: Visualizing interaction between age and diagnosis by plotting rel_prop vs. age in each diagnosis 
+figure_2c = bp_mgp_estimations_long %>% filter(ageDeath < 90) %>%
+  filter(cell_type %in% c("PVALB", "SST", "VIP")) %>%
+  ggplot(aes(x = ageDeath, y = rel_prop, color = primaryDiagnosis)) +
+  geom_point(alpha = 0.5, size = 0.5) + 
+  geom_smooth(se = F, method = 'lm', fullrange = T) +
+  ylab('rCTP residuals (AU)') + 
+  xlab('Age at death (years)') + 
+  theme(
+    axis.text.x = element_text(size = 15),
+    axis.text.y = element_text(size = 15),
+    axis.title.x = element_text(vjust = -2, size = 15),
+    axis.title.y = element_text(size = 15),
+    legend.position = c(0.9, 0.9),
+    legend.title = element_blank(),
+    legend.text = element_text(size = 12),  
+    strip.text.x = element_text(size = 14)) +
+  facet_grid(~cell_type, drop = T, scale = "free_x", space = "free") +
+  guides(fill = guide_legend(nrow = 1)) +
+  scale_y_continuous(limits = c(-3, 3)) + 
+  scale_color_manual(values = c("dodgerblue2", "firebrick2"), labels=c('CON', 'BP'))
+
+#Figure 2d: Mega-analysis results when binned as +/- 70 years
+significant_mega_age_class = subset(mega_lms_by_age_class, padj <= 0.1 & term == "BP" & cell_type %in% c("PVALB", "SST", "VIP"))
+significant_mega_age_class$asterisks = ifelse(significant_mega_age_class$padj <= 0.01, "***", ifelse(significant_mega_age_class$padj <= 0.05, "**", "*"))
+significant_mega_age_class$vjust = ifelse(significant_mega_age_class$estimate >= 0, -3, 3)
+
+figure_2d = mega_lms_by_age_class %>% 
+  filter(term %in% 'BP' & cell_type %in% c("PVALB", "SST", "VIP")) %>% 
+  ggplot(aes(x = age_class, y = estimate, fill = age_class)) + 
+  geom_hline(yintercept = 0) + 
+  geom_bar(stat = "identity", position = "dodge") + 
+  geom_errorbar(aes(ymin = estimate - std.error, ymax = estimate + std.error)) + 
+  ylab('') + 
+  xlab('\n \n Age group') + 
+  scale_fill_manual(values = c("mediumpurple3", "olivedrab3"), labels=c('Above 70', 'Below 70')) +
+  geom_text(data = significant_mega_age_class,
+            aes(age_class, estimate, label = asterisks), 
+            vjust = significant_mega_age_class$vjust) +
+  theme(
+    axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1, size = 13), 
+    axis.text.y = element_text(size = 15),
+    axis.title.x = element_text(vjust = 8, size = 15),
+    axis.title.y = element_text(size = 15),
+    strip.text.x = element_text(size = 14)) +
+  facet_wrap(~cell_type, drop = T, scale = "free_x") +
+  guides(fill = FALSE) +
+  scale_y_continuous(limits = c(-0.6, 1.4))
+
+figure_2_middle = (figure_2b +figure_2d) + plot_layout(widths = c(2,1))
+figure_2 =  figure_2c / figure_2_middle / figure_2a
+figure_2 = figure_2 + plot_annotation(tag_levels = 'A') + plot_layout(heights = c(1, 1, 1)) & theme(plot.tag = element_text(size = 25))
+figure_2
+
+
+```
+
+
+AgeOnset vs. MGP
+```{r, fig.width=4, fig.height=3}
+#Duration of Illness
+bp_mgp_estimations_long$durationIllness <- bp_mgp_estimations_long$ageDeath - bp_mgp_estimations_long$ageOnset
+
+CELL_TYPES = c("SST", "PVALB", "VIP")
+DATASETS = c("GVEX", "CMC")
+ageOnset_residuals_data = matrix(ncol = (ncol(bp_mgp_estimations_long)+1), nrow = 0) %>% data.frame()
+colnames(ageOnset_residuals_data) = c(colnames(bp_mgp_estimations_long), "resid")
+
+for(DATASET in DATASETS) {
+  for(CELL_TYPE in CELL_TYPES) {
+    #Create res_model without ageOnset variable
+    res_model_data = bp_mgp_estimations_long %>% filter(primaryDiagnosis %in% c('Bipolar Disorder'), cell_type == CELL_TYPE , dataset == DATASET, is.na(ageOnset) == F)
+    #Model without ageOnset
+    res_model = lm(scale(rel_prop) ~ scale(ageDeath) + scale(RIN) + scale(PMI) + reportedGender, data = res_model_data)
+    #Calculate residuals and add column to res_model_data
+    res_model_data = res_model_data %>% add_residuals(var = "resid", model = res_model)
+    ageOnset_residuals_data = ageOnset_residuals_data %>% rbind(res_model_data)
+  }
+}
+
+figure_5 <- ageOnset_residuals_data %>%
+  ggplot(aes(x = ageOnset, y = resid, color = dataset)) +
+  geom_point(alpha = 0.5, size = 0.8) + 
+  geom_smooth(se = FALSE, method = 'lm', fullrange = TRUE) +
+  ylab('rCTP residuals (AU)') + 
+  xlab('Age of BP onset') + 
+  theme(
+    axis.text.x = element_text(size = 16),
+    axis.text.y = element_text(size = 16),
+    axis.title.x = element_text(vjust = -2, size = 16, margin = margin(t = 8)),
+    axis.title.y = element_text(size = 16),
+    strip.text = element_text(size = 16),
+    legend.text = element_text(size = 16),
+    plot.margin = margin(10, 10, 20, 10)) +
+  facet_grid(cols = vars(cell_type), rows = vars(dataset)) +
+  scale_y_continuous(limits = c(-1.5, 1.5)) + 
+  scale_color_manual(values = c("dodgerblue2", "firebrick2")) +
+  guides(color = guide_legend(title = NULL)) +
+  stat_cor(aes(label = paste(..r.label.., ..p.label.., sep = "~")), color = "black", geom = "label")
+
+figure_5
+```
+
+

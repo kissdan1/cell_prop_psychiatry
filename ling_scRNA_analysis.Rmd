@@ -1,0 +1,236 @@
+---
+title: "ling_scRNA_analysis"
+author: "Daniel Kiss"
+date: "`r Sys.Date()`"
+output: html_document
+---
+Packages etc.
+```{r}
+library(dplyr)
+library(tidyverse)
+library(matrixStats)
+library(cowplot)
+library(broom)
+library(knitr)
+library(ggpubr)
+library(ggrepel)
+library(ggbeeswarm)
+library(patchwork)
+library(ggsignif)
+library(modelr)
+theme_set(theme_classic2())
+#Colour palette
+cbPalette = c("#56B4E9", "#009E73","#E69F00", "#0072B2", "#D55E00", "#CC79A7","#000000","#F0E442")
+```
+
+Load Data
+```{r}
+cell_meta = read.delim("~/cell_prop_psychiatry/data/BA46.jointMetadata.txt")
+donor_meta = read.delim("~/cell_prop_psychiatry/data/SZvillage_donorMetadata.txt")
+```
+
+```{r}
+#Create a data frame that counts the total cells in each cell subtype per donor 
+cell_meta= cell_meta %>%
+  mutate(new_subclass = case_when(
+    !is.na(subclass) ~ subclass,
+    is.na(subclass) & !is.na(cellclass) ~ cellclass,
+    TRUE ~ NA_character_
+  ))
+
+cells_summary = cell_meta %>%
+  group_by(DONOR, new_subclass) %>%
+  summarize(count = n(), .groups = "drop") %>%
+  pivot_wider(names_from = new_subclass, values_from = count, values_fill = 0) %>%
+  mutate(total_cells = rowSums(across(where(is.numeric)))) %>%
+  relocate(total_cells, .after = DONOR)
+
+#Calculate ling_snCTPs as a function of total cells for each donor
+ling_snCTP_estimations = cells_summary %>%
+  mutate(across(-c(DONOR, total_cells), ~ .x / total_cells))
+
+#Merge with metadata
+ling_snCTP_estimations = ling_snCTP_estimations %>%
+  left_join(
+    donor_meta %>%
+      select(nbb.id, Sex, Age, PMI, Schizophrenia),
+    by = c("DONOR" = "nbb.id"))
+
+#Impute missing PMI values - use average PMI across all subjects
+ling_snCTP_estimations$PMI[is.na(ling_snCTP_estimations$PMI)] = mean(ling_snCTP_estimations$PMI, na.rm = TRUE)
+
+#Pivot to long
+ling_snCTP_estimations_long = ling_snCTP_estimations %>% pivot_longer(
+    cols = 3:22, 
+    names_to = "cell_type", 
+    values_to = "fraction"
+  )
+#Convert cell fraction to to percentage
+ling_snCTP_estimations_long$fraction = ling_snCTP_estimations_long$fraction * 100
+
+# Define a function to classify ages into "Under 70" vs. "Over 70"
+classify_ages = function(ages) {
+  classifications = ifelse(ages <= 70, "Under 70", "Over 70")
+  return(classifications)}
+#Apply the function to the Age column
+ling_snCTP_estimations_long$age_class = sapply(ling_snCTP_estimations_long$Age, classify_ages) %>% factor(levels = c("Under 70", "Over 70"))
+
+write.csv(ling_snCTP_estimations, "~/cell_prop_psychiatry/data/ling_snCTP_estimations")
+write.csv(ling_snCTP_estimations_long, "~/cell_prop_psychiatry/data/ling_snCTP_estimations_long")
+```
+
+Figure 1: snCTP vs Age in SCZ and Controls
+```{r, fig.height=4, fig.width=8}
+ling_snCTP_estimations_long %>%
+  filter(cell_type %in% c("SST", "PVALB", "VIP")) %>%
+  ggplot(aes(x = Age, y = fraction, color = Schizophrenia)) +
+  geom_point(alpha = 0.8, size = 1.3) +
+  geom_smooth(se = FALSE, method = "lm") +
+  facet_wrap(~ cell_type, scales = "free", nrow = 1) +
+  xlab("Age at death (years)") +
+  ylab("ling_snCTP (%)") +
+  theme(
+    axis.text.x = element_text(size = 13),
+    axis.text.y = element_text(size = 13),
+    axis.title.x = element_text(size = 16),
+    axis.title.y = element_text(size = 16),
+    legend.title = element_blank(),
+    legend.text = element_text(size = 12),
+    strip.text.x = element_text(size = 15),
+    strip.text.y = element_text(size = 15)
+  ) +
+  scale_color_manual(
+    values = c("Unaffected" = "dodgerblue2", "Affected" = "firebrick2"),
+    labels = c("SCZ", "CON")
+  )
+
+```
+
+Modelling snCTP association with SCZ in above and below 70 age groups
+```{r}
+#Factor disease column 
+ling_snCTP_estimations_long$Schizophrenia = ling_snCTP_estimations_long$Schizophrenia %>% factor(levels = c("Unaffected", "Affected"))
+#Linear model
+ling_lms_by_age_class = ling_snCTP_estimations_long %>% 
+  group_by(cell_type, age_class) %>%
+  do(tidy(lm(scale(fraction) ~ scale(PMI) + Sex + Schizophrenia, data = .))) %>%
+  ungroup() %>% 
+  mutate(padj = p.adjust(`p.value`, method = 'fdr'),
+         term = recode(term,
+                       `(Intercept)` = "Intercept",
+                       `SexMale` = "Sex:Male",
+                       `SchizophreniaAffected` = "SCZ",
+                       `scale(PMI)` = "PMI")) 
+```
+
+
+Figure 2: Affect of SCZ on snCTPs in above 70 and below 70 age groups 
+```{r}
+# Subset significant results (padj <= 0.1) for SCZ vs. control comparisons
+significant_age_class = subset(
+  ling_lms_by_age_class,
+  padj <= 0.1 & term == "SCZ" & cell_type %in% c("SST", "PVALB", "VIP")
+)
+# Assign asterisks based on adjusted p-value thresholds
+significant_age_class$asterisks = ifelse(
+  significant_age_class$padj <= 0.01, 
+  "***", 
+  ifelse(significant_age_class$padj <= 0.05, "**", "*")
+)
+# Position the asterisk above or below the bar depending on the sign of the estimate
+significant_age_class$vjust = ifelse(
+  significant_age_class$estimate >= 0, 
+  -3, 
+  3
+)
+#Plot
+ling_lms_by_age_class %>% 
+  filter(term == "SCZ" & cell_type %in% c("SST", "PVALB", "VIP")) %>% 
+  mutate(cell_type = fct_reorder(cell_type, estimate)) %>% 
+  ggplot(aes(x = age_class, y = estimate, fill = age_class)) +
+  # Horizontal reference line at 0
+  geom_hline(yintercept = 0, color = "grey40") +
+  # Bar plot of the beta coefficient
+  geom_bar(stat = "identity", position = "dodge") +
+  # Error bars: ±1 standard error
+  geom_errorbar(aes(ymin = estimate - std.error, ymax = estimate + std.error),
+                width = 0.2, position = position_dodge(width = 0.9)) +
+  # Axis labels
+  ylab("Beta Coefficient") +
+  xlab("\n \n Age Range") +
+  # Custom fill colors for the two age bins
+  scale_fill_manual(
+    values = c("mediumpurple3", "olivedrab3"),
+    labels = c("Below 70", "Above 70")
+  ) +
+  # Add the significance asterisks from the subset
+  geom_text(data = significant_age_class,
+            aes(x = age_class, y = estimate, label = asterisks, vjust = vjust),
+            position = position_dodge(width = 0.9)) +
+  # Facet by newStudy (rows) and cell_type (columns)
+  facet_grid(~ cell_type, drop = TRUE, scale = "free_x", space = "free") +
+  # Theming
+  theme(
+    axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1, size = 13),
+    axis.text.y = element_text(size = 15),
+    axis.title.x = element_text(vjust = 8, size = 15),
+    axis.title.y = element_text(size = 15),
+    strip.text.x = element_text(size = 14),
+    strip.text.y = element_text(size = 14)
+  ) 
+```
+
+
+```{r, fig.height=9, fig.width=6}
+ling_snCTP_estimations_long = ling_snCTP_estimations_long %>%
+  group_by(cell_type) %>%
+  mutate(resid = resid(lm(scale(fraction)  ~ scale(PMI) + Sex))) %>%
+  ungroup()
+
+ling_snCTP_estimations_long %>%
+  filter(cell_type %in% c("SST", "PVALB", "VIP")) %>%
+  ggplot(aes(x = Schizophrenia, y = fraction)) +
+  geom_boxplot(
+    outlier.shape = NA,
+    aes(fill = Schizophrenia, alpha = 0.5),
+    show.legend = FALSE,
+    notch = TRUE
+  ) +
+  geom_beeswarm(
+    size = 1,
+    alpha = 0.3,
+    aes(color = Schizophrenia),
+    show.legend = FALSE
+  ) +
+  ylab("ling_snCTP (%)") +
+  xlab("Diagnosis") +
+  scale_x_discrete(labels = c("Unaffected" = "C", "Affected" = "SCZ")) +
+  scale_colour_manual(values = cbPalette) +
+  scale_fill_manual(values = cbPalette) +
+  theme(
+    axis.text.x = element_text(size = 15),
+    axis.text.y = element_text(size = 15),
+    axis.title.x = element_text(vjust = -2, size = 15),
+    axis.title.y = element_text(size = 15),
+    strip.text.x = element_text(size = 14),
+    strip.text.y = element_text(size = 14)
+  ) +
+  guides(fill = FALSE) +
+  facet_grid(
+    rows = vars(cell_type),
+    cols = vars(age_class),
+    drop = TRUE,
+    scale = "free",
+    switch = "y",
+    space = "free"
+  ) +
+  geom_signif(
+    comparisons = list(c("Unaffected", "Affected")),
+    map_signif_level = TRUE,
+    test = wilcox.test
+  )
+```
+
+
+
+

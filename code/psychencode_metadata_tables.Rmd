@@ -1,0 +1,106 @@
+---
+title: "psychencode_metadata_tables"
+author: "Daniel Kiss"
+date: "3/12/2025"
+output: html_document
+---
+Packages etc.
+```{r}
+library(dplyr)
+library(tidyverse)
+library(edgeR)
+library(markerGeneProfile) 
+library(matrixStats)
+library(cowplot) 
+library(broom)
+library(knitr)
+library(ggpubr)
+library(ggrepel)
+library(patchwork)
+library(ggsignif)
+library(modelr)
+library(ggbeeswarm)
+library(lemon)
+theme_set(theme_classic2())
+#Colour palette
+cbPalette = c("#56B4E9", "#009E73","#E69F00", "#0072B2", "#D55E00", "#CC79A7","#000000","#F0E442")
+```
+
+Loading Data
+```{r}
+#Cell type proportions for each data set merged with metadata - ready for modelling 
+mgp_estimations = read_csv( "/external/rprshnas01/kcni/dkiss/cell_prop_psychiatry/data/psychencode_mgp_estimations.csv") 
+acc_estimations = read_csv("/external/rprshnas01/kcni/dkiss/cell_prop_psychiatry/data/cmc_acc_mgp_estimations.csv") %>% filter(primaryDiagnosis %in% c("control", "Schizophrenia"))
+#Factorize newStudy for aesthetic purposes (this orderl ooks good on graphs)
+mgp_estimations = mgp_estimations %>% filter(ageDeath >= 15)
+mgp_estimations$newStudy = mgp_estimations$newStudy %>% factor(levels = c("Pitt", "GVEX", "NIMH_HBCC", "LIBD_szControl", "MSSM", "Penn"))
+mgp_estimations_long = mgp_estimations %>% pivot_longer(cols = Astrocyte:VLMC, names_to = 'cell_type', values_to = 'rel_prop') %>%
+  mutate(cell_class = case_when(
+    cell_type %in% c( "PVALB", "SST", "VIP", "LAMP5", "PAX6") ~ "Inhibitory",
+    cell_type %in% c("IT", "L4.IT", "L5.ET", "L5.6.IT.Car3", "L5.6.NP", "L6.CT", "L6b") ~ "Excitatory",
+    TRUE ~ "Non-Neuronal"
+  ))
+mgp_estimations_long$cell_type = mgp_estimations_long$cell_type %>% factor(levels = c("PVALB", "SST", "VIP", "LAMP5", "PAX6", "IT", "L4.IT", "L5.ET", "L5.6.IT.Car3", "L5.6.NP", "L6.CT", "L6b", "Astrocyte", "Endothelial", "Microglia", "Oligodendrocyte", "OPC", "Pericyte", "VLMC"))
+mgp_estimations_long$cell_class = mgp_estimations_long$cell_class %>% factor(levels = c("Inhibitory", "Excitatory", "Non-Neuronal"))
+
+acc_estimations_long = acc_estimations %>% pivot_longer(cols = Astrocyte:VLMC, names_to = 'cell_type', values_to = 'rel_prop') %>%
+  mutate(cell_class = case_when(
+    cell_type %in% c("PVALB", "SST", "VIP", "LAMP5", "PAX6") ~ "Inhibitory",
+    cell_type %in% c("IT", "L4.IT", "L5.ET", "L5.6.IT.Car3", "L5.6.NP", "L6.CT", "L6b") ~ "Excitatory",
+    TRUE ~ "Non-Neuronal"
+  ))
+acc_estimations_long$cell_type = acc_estimations_long$cell_type %>% factor(levels = c("PVALB", "SST", "VIP", "LAMP5", "PAX6", "IT", "L4.IT", "L5.ET", "L5.6.IT.Car3", "L5.6.NP", "L6.CT", "L6b", "Astrocyte", "Endothelial", "Microglia", "Oligodendrocyte", "OPC", "Pericyte", "VLMC"))
+acc_estimations_long$cell_class = acc_estimations_long$cell_class %>% factor(levels = c("Inhibitory", "Excitatory", "Non-Neuronal"))
+```
+
+Load snRNAseq proportions
+```{r}
+psychencode_snCTPs = read.csv('/external/rprshnas01/netdata_kcni/stlab/Xiaolin/cell_deconv_data/PsychEncode_label_transferred_snCTP.csv')
+snCTP_metadata = read.csv("~/cell_prop_psychiatry/data/psychencode_label_transferred_pseudobulk_metadata.csv")[,-1] %>%
+  group_by(ID) %>%
+  mutate(total_cells = sum(num_cells)) %>%
+  ungroup() 
+#Add log10 number of cells variable
+snCTP_metadata$log10_num_cells = log10(snCTP_metadata$num_cells)
+#Add age group variable
+snCTP_metadata =  snCTP_metadata %>%
+  mutate(age_group = case_when(
+    Age < 70 ~ "Under_70", Age >= 70 ~ "Over_70")) 
+snCTP_metadata$age_group = snCTP_metadata$age_group %>% factor(levels = c("Under_70", "Over_70"))
+psychencode_snCTPs = left_join(snCTP_metadata, psychencode_snCTPs) 
+```
+
+```{r}
+ling_snCTPs = read.csv("~/cell_prop_psychiatry/data/ling_snCTP_estimations")
+```
+
+
+Cohort demographic summary
+```{r}
+summary_df <- mgp_estimations %>%
+  mutate(individualIDSource = factor(newStudy, 
+         levels = c("Pitt", "GVEX", "NIMH_HBCC", "LIBD_szControl", "MSSM", "Penn"))) %>%
+  group_by(newStudy) %>%
+  summarise(
+    CohortName = first(newStudy),
+    PercentMale = mean(reportedGender == "male", na.rm = TRUE) * 100,
+    AvgAge = mean(ageDeath, na.rm = TRUE),
+    AgeSD = sd(ageDeath, na.rm = TRUE),
+    AgeMin = min(ageDeath, na.rm = TRUE),
+    AgeMax = max(ageDeath, na.rm = TRUE),
+    NumCases = sum(primaryDiagnosis == "Schizophrenia", na.rm = TRUE),
+    NumControls = sum(primaryDiagnosis == "control", na.rm = TRUE),
+    AvgPMI = mean(PMI, na.rm = TRUE),
+    PMISD = sd(PMI, na.rm = TRUE),
+    AvgPh = mean(pH, na.rm = TRUE),
+    PhSD = sd(pH, na.rm = TRUE)
+  ) %>%
+  mutate(
+    MeanAge = paste0(sprintf("%.2f", AvgAge), " (", sprintf("%.2f", AgeSD), ")"),
+    ageRange = paste0(AgeMin, "-", AgeMax),
+    MeanPMI = paste0(sprintf("%.2f", AvgPMI), " (", sprintf("%.2f", PMISD), ")"),
+    MeanpH = paste0(sprintf("%.2f", AvgPh), " (", sprintf("%.2f", PhSD), ")")
+  ) %>%
+  select(-AvgAge, -AgeSD, -AgeMin, -AgeMax, -AvgPMI, -PMISD, -AvgPh, -PhSD)
+
+```

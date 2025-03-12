@@ -1,0 +1,47 @@
+---
+title: "bipseq_matrix_aggregation"
+author: "Daniel Kiss"
+date: "11/7/2024"
+output: html_document
+---
+
+```{r}
+library(dplyr)
+library(tidyverse)
+library(edgeR)
+library(markerGeneProfile)
+library(matrixStats)
+library(cowplot)
+library(broom)
+library(knitr)
+library(ggpubr)
+library(biomaRt)
+theme_set(theme_cowplot())
+```
+
+Combining gene expression .results from BipSeq
+```{r}
+#Create vectors with gene and isoform filenames
+csv_dir <- "/external/rprshnas01/external_data/psychencode/PsychENCODE/BipSeq/RNAseq/"
+gene_csv <- list.files(path = csv_dir, pattern = "\\genes.results$")
+isoform_csv <- list.files(path = csv_dir, pattern = "\\isoforms.results$")
+
+#Loop through gene files
+setwd(csv_dir)
+for (i in 1:length(gene_csv)) {
+  curr_file <- gene_csv[i] # get current file 
+  sample_matrix <- read.delim(file = paste(csv_dir, curr_file, sep = "")) # intake current file table
+  sample_name <- gsub("\\..*","", curr_file) # get sample name (approximate)
+  colnames(sample_matrix)[5] <- sample_name # set sample name over expected counts column
+  sample_matrix <- sample_matrix[,c("gene_id", sample_name)] # take columns of interest
+  if (i == 1) {
+  gene_count_matrix <- sample_matrix
+  } else {
+  gene_count_matrix <- left_join(gene_count_matrix, sample_matrix, by = "gene_id")
+  }
+}
+row.names(gene_count_matrix) <- gene_count_matrix$gene_id # set row names as gene names
+gene_count_matrix <- gene_count_matrix[-1] # remove gene name column to make object pure matrix
+write.csv(gene_count_matrix, "/external/rprshnas01/kcni/dkiss/cell_prop_psychiatry/data/BipSeq_count_matrix.csv", row.names = F, col.names = T)
+
+```
